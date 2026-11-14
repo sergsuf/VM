@@ -1,0 +1,61 @@
+# Configuration for 3ds Max 2025 popup watcher & AHK automation
+
+target_processes:
+  - "3dsmax"
+  - "AdskIdentityManager"
+  - "AdSSO"
+  - "AdskAccess"
+  - "Autodesk"
+  - "MAXScript"
+
+# Windows that represent the main 3ds Max workspace (never treated as unknown popups)
+ignore_windows:
+  - name: "Main 3ds Max Workspace"
+    title_regex: "^(Untitled|.*\\.max)\\s*-\\s*Autodesk 3ds Max 2025"
+
+# Ordered list of popup handling rules (first match wins)
+rules:
+  - name: "Privacy / Data Collection Consent"
+    title_regex: "(?i)(privacy|data collection|telemetry|customer involvement)"
+    action:
+      type: "click_control"
+      control_names: ["OK", "I Agree", "Agree", "Accept", "Continue", "Close"]
+    cooldown_sec: 3
+
+  - name: "EULA / License Agreement"
+    title_regex: "(?i)(license agreement|end user|eula|terms of use)"
+    action:
+      type: "click_control"
+      control_names: ["I Agree", "Agree", "Accept", "Next", "Continue"]
+    cooldown_sec: 3
+
+  - name: "Welcome / What's New Screen"
+    title_regex: "(?i)(welcome to 3ds max|what's new|get started)"
+    action:
+      type: "click_control"
+      control_names: ["Close", "Skip", "Continue", "Start 3ds Max", "OK"]
+    cooldown_sec: 3
+
+  - name: "3ds Max Security / Untrusted Script Warning"
+    title_regex: "(?i)(security|untrusted|safe scene|script)"
+    text_contains: ["script", "trust", "security"]
+    action:
+      type: "click_control"
+      control_names: ["Load", "Allow", "Run", "Yes", "OK", "Continue"]
+    cooldown_sec: 2
+
+  - name: "Generic Error / Warning / Missing Plugin Dialog"
+    process_contains: "3dsmax"
+    title_regex: "(?i)(warning|error|missing|dll|plugin|maxscript)"
+    action:
+      type: "click_control"
+      control_names: ["OK", "Continue", "Ignore", "Yes", "Close"]
+    cooldown_sec: 2
+
+  - name: "Autodesk Sign-In / Identity Prompt (Dismiss if offline/testing)"
+    process_contains: "AdskIdentityManager"
+    title_regex: ".*"
+    action:
+      type: "click_control"
+      control_names: ["Continue", "Next", "Skip", "Cancel", "Close"]
+    cooldown_sec: 5

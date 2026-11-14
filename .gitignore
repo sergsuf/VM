@@ -1,0 +1,16 @@
+# Python dependencies
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Logs and screenshots generated on VM
+logs/
+*.log
+
+# Local overrides
+config/local.yaml
