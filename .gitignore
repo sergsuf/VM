@@ -14,3 +14,7 @@ logs/
 
 # Local overrides
 config/local.yaml
+
+# VM persistent state backup on Z: (contains runner credentials and tokens)
+_vm_state/
+
