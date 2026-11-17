@@ -79,8 +79,8 @@ jobs:
         run: |
           $logPath = Join-Path "${{ github.workspace }}" "logs\orchestrator_run.log"
           "## VM Orchestrator Result" >> $env:GITHUB_STEP_SUMMARY
-          "- **Mode**: `${{ inputs.mode }}`" >> $env:GITHUB_STEP_SUMMARY
-          "- **Status**: `${{ steps.run_task.outcome }}`" >> $env:GITHUB_STEP_SUMMARY
+          '- **Mode**: `${{ inputs.mode }}`' >> $env:GITHUB_STEP_SUMMARY
+          '- **Status**: `${{ steps.run_task.outcome }}`' >> $env:GITHUB_STEP_SUMMARY
           if (Test-Path $logPath) {
             "" >> $env:GITHUB_STEP_SUMMARY
             "### Tail of orchestrator_run.log" >> $env:GITHUB_STEP_SUMMARY
