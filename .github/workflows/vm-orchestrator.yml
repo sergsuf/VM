@@ -1,0 +1,90 @@
+name: VM Orchestrator
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Execution mode: antigravity_cli | max_auto | powershell"
+        required: true
+        default: "antigravity_cli"
+        type: choice
+        options:
+          - antigravity_cli
+          - max_auto
+          - powershell
+      prompt_or_command:
+        description: "Prompt for Antigravity CLI, subcommand for max-auto (e.g. 'run --timeout 180'), or PowerShell command"
+        required: true
+        type: string
+      cli_executable:
+        description: "Antigravity CLI executable name or path (used in antigravity_cli mode)"
+        required: false
+        default: "antigravity"
+        type: string
+      cli_args_prefix:
+        description: "Flags before the prompt for Antigravity CLI (e.g. '-p' or empty)"
+        required: false
+        default: "-p"
+        type: string
+      working_dir:
+        description: "Optional working directory override on the VM"
+        required: false
+        default: ""
+        type: string
+      runner_label:
+        description: "Self-hosted runner label (default: self-hosted)"
+        required: false
+        default: "self-hosted"
+        type: string
+
+jobs:
+  execute-on-vm:
+    runs-on: ${{ inputs.runner_label }}
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Execute task on VM
+        id: run_task
+        shell: powershell
+        env:
+          ORCH_MODE: ${{ inputs.mode }}
+          ORCH_PROMPT_OR_COMMAND: ${{ inputs.prompt_or_command }}
+          ORCH_CLI_EXE: ${{ inputs.cli_executable }}
+          ORCH_CLI_ARGS_PREFIX: ${{ inputs.cli_args_prefix }}
+          ORCH_WORKING_DIR: ${{ inputs.working_dir }}
+        run: |
+          & "${{ github.workspace }}\vm\run_orchestrator_task.ps1" `
+            -Mode $env:ORCH_MODE `
+            -PromptOrCommand $env:ORCH_PROMPT_OR_COMMAND `
+            -CliExecutable $env:ORCH_CLI_EXE `
+            -CliArgsPrefix $env:ORCH_CLI_ARGS_PREFIX `
+            -WorkingDir $env:ORCH_WORKING_DIR
+
+      - name: Upload logs and popup screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vm-orchestrator-logs-${{ github.run_number }}
+          path: |
+            logs/**
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Write job summary
+        if: always()
+        shell: powershell
+        run: |
+          $logPath = Join-Path "${{ github.workspace }}" "logs\orchestrator_run.log"
+          "## VM Orchestrator Result" >> $env:GITHUB_STEP_SUMMARY
+          "- **Mode**: `${{ inputs.mode }}`" >> $env:GITHUB_STEP_SUMMARY
+          "- **Status**: `${{ steps.run_task.outcome }}`" >> $env:GITHUB_STEP_SUMMARY
+          if (Test-Path $logPath) {
+            "" >> $env:GITHUB_STEP_SUMMARY
+            "### Tail of orchestrator_run.log" >> $env:GITHUB_STEP_SUMMARY
+            '```text' >> $env:GITHUB_STEP_SUMMARY
+            Get-Content $logPath -Tail 80 >> $env:GITHUB_STEP_SUMMARY
+            '```' >> $env:GITHUB_STEP_SUMMARY
+          }
