@@ -11,16 +11,26 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$PromptOrCommand,
 
-    [string]$CliExecutable = "antigravity",
+    [string]$CliExecutable = "agy",
     [string]$CliArgsPrefix = "-p",
     [string]$WorkingDir = ""
 )
 
 $ErrorActionPreference = "Continue"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $logDir = Join-Path $repoRoot "logs"
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 $logFile = Join-Path $logDir "orchestrator_run.log"
+
+function Write-OrchLog {
+    param([Parameter(ValueFromPipeline = $true)]$InputObject)
+    process {
+        $text = if ($null -eq $InputObject) { "" } else { $InputObject.ToString() }
+        Write-Host $text
+        Add-Content -Path $logFile -Value $text -Encoding utf8
+    }
+}
 
 $sessionId = [System.Diagnostics.Process]::GetCurrentProcess().SessionId
 $header = @"
@@ -33,7 +43,7 @@ $header = @"
 [Orchestrator] Command   : $PromptOrCommand
 ============================================================
 "@
-$header | Tee-Object -FilePath $logFile
+$header | Out-File -FilePath $logFile -Encoding utf8
 
 if ($WorkingDir -and (Test-Path $WorkingDir)) {
     Push-Location $WorkingDir
@@ -56,19 +66,19 @@ try {
                 $cmdArgs += ($CliArgsPrefix.Trim() -split "\s+")
             }
             $cmdArgs += $PromptOrCommand
-            Write-Host "[Orchestrator] Running: $CliExecutable $($cmdArgs -join ' ')" | Tee-Object -FilePath $logFile -Append
-            & $CliExecutable @cmdArgs 2>&1 | Tee-Object -FilePath $logFile -Append
+            Write-OrchLog "[Orchestrator] Running: $CliExecutable $($cmdArgs -join ' ')"
+            & $CliExecutable @cmdArgs 2>&1 | Write-OrchLog
             $exitCode = $LASTEXITCODE
         }
         "max_auto" {
             $cmdArgs = $PromptOrCommand.Trim() -split "\s+"
-            Write-Host "[Orchestrator] Running: max-auto $($cmdArgs -join ' ')" | Tee-Object -FilePath $logFile -Append
-            & max-auto @cmdArgs 2>&1 | Tee-Object -FilePath $logFile -Append
+            Write-OrchLog "[Orchestrator] Running: max-auto $($cmdArgs -join ' ')"
+            & max-auto @cmdArgs 2>&1 | Write-OrchLog
             $exitCode = $LASTEXITCODE
         }
         "powershell" {
-            Write-Host "[Orchestrator] Running PowerShell snippet..." | Tee-Object -FilePath $logFile -Append
-            Invoke-Expression $PromptOrCommand 2>&1 | Tee-Object -FilePath $logFile -Append
+            Write-OrchLog "[Orchestrator] Running PowerShell snippet..."
+            Invoke-Expression $PromptOrCommand 2>&1 | Write-OrchLog
             if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) {
                 $exitCode = $LASTEXITCODE
             } elseif (-not $?) {
@@ -78,12 +88,12 @@ try {
     }
 }
 catch {
-    $_ | Out-String | Tee-Object -FilePath $logFile -Append
+    ($_ | Out-String) | Write-OrchLog
     $exitCode = 1
 }
 finally {
     Pop-Location
 }
 
-"`n[Orchestrator] Finished with exit code: $exitCode" | Tee-Object -FilePath $logFile -Append
+Write-OrchLog "`n[Orchestrator] Finished with exit code: $exitCode"
 exit $exitCode

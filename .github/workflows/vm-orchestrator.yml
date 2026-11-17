@@ -19,7 +19,7 @@ on:
       cli_executable:
         description: "Antigravity CLI executable name or path (used in antigravity_cli mode)"
         required: false
-        default: "antigravity"
+        default: "agy"
         type: string
       cli_args_prefix:
         description: "Flags before the prompt for Antigravity CLI (e.g. '-p' or empty)"
