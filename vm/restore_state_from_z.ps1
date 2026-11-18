@@ -78,7 +78,29 @@ if (Test-Path $gitCfgBackup) {
     Write-Host "[Restore] Restored .gitconfig"
 }
 
-# 5. Start interactive runner if not already running
+# 5. Ensure PowerShell ExecutionPolicy Bypass for CurrentUser
+try {
+    Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy Bypass -Force
+    Write-Host "[Restore] Set CurrentUser ExecutionPolicy to Bypass"
+} catch {
+    Write-Host "[Restore] Warning: failed to set ExecutionPolicy: $($_.Exception.Message)"
+}
+
+# 6. Register Scheduled Task so runner starts automatically at logon after any checkpoint rollback
+try {
+    $taskName = "ActionsRunner-AUTO"
+    $actionCmd = '/c "if not exist C:\actions-runner\run.cmd (powershell.exe -NoProfile -ExecutionPolicy Bypass -File Z:\_vm_state\restore_state_from_z.ps1 -NoStartRunner) & if exist C:\actions-runner\run.cmd (cd /d C:\actions-runner && C:\actions-runner\run.cmd)"'
+    $action = New-ScheduledTaskAction -Execute "cmd.exe" -Argument $actionCmd
+    $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+    $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Hours 0) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
+    Write-Host "[Restore] Registered Scheduled Task: $taskName"
+} catch {
+    Write-Host "[Restore] Warning: failed to register Scheduled Task: $($_.Exception.Message)"
+}
+
+# 7. Start interactive runner if not already running
 if (-not $NoStartRunner) {
     $running = Get-Process -Name "Runner.Listener" -ErrorAction SilentlyContinue
     if ($running) {
