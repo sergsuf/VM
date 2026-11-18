@@ -105,23 +105,28 @@ def deploy_cmd(source: Path, version: str, startup: bool, dry_run: bool) -> None
 
 
 @cli.command()
-@click.option("--max-exe", type=click.Path(path_type=Path), default=DEFAULT_3DSMAX_EXE)
+@click.option("--version", default="2025", show_default=True, help="3ds Max version year (e.g. 2025 or 2027).")
+@click.option("--max-exe", type=click.Path(path_type=Path), default=None, help="Optional override path to 3dsmax.exe.")
 @click.option("--scripts-dir", type=click.Path(path_type=Path), default=Path("max_scripts"))
 @click.option("--config", "-c", type=click.Path(exists=True, path_type=Path), default=DEFAULT_CONFIG)
 @click.option("--ahk-exe", type=click.Path(path_type=Path), default=None)
 @click.option("--timeout", "-t", type=float, default=300.0)
 @click.option("--dry-run", is_flag=True)
 def run(
-    max_exe: Path,
+    version: str,
+    max_exe: Path | None,
     scripts_dir: Path,
     config: Path,
     ahk_exe: Path | None,
     timeout: float,
     dry_run: bool,
 ) -> None:
-    """Full flow: deploy scripts -> launch 3ds Max 2025 -> watch & handle popups."""
+    """Full flow: deploy scripts -> launch 3ds Max -> watch & handle popups."""
+    if max_exe is None:
+        max_exe = Path(rf"C:\Program Files\Autodesk\3ds Max {version}\3dsmax.exe")
+
     if scripts_dir.exists():
-        deployed = deploy_scripts(scripts_dir, version="2025", startup=True, dry_run=dry_run)
+        deployed = deploy_scripts(scripts_dir, version=version, startup=True, dry_run=dry_run)
         click.echo(f"[DEPLOY] {len(deployed)} script item(s) deployed.")
 
     click.echo(f"[LAUNCH] Starting {max_exe}...")

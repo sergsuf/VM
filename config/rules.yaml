@@ -11,7 +11,7 @@ target_processes:
 # Windows that represent the main 3ds Max workspace (never treated as unknown popups)
 ignore_windows:
   - name: "Main 3ds Max Workspace"
-    title_regex: "^(Untitled|.*\\.max)\\s*-\\s*Autodesk 3ds Max 2025"
+    title_regex: "^(Untitled|.*\\.max)\\s*-\\s*Autodesk 3ds Max (2025|2027)"
 
 # Ordered list of popup handling rules (first match wins)
 rules:
