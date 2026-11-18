@@ -48,7 +48,7 @@ jobs:
 
       - name: Execute task on VM
         id: run_task
-        shell: powershell
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
         env:
           ORCH_MODE: ${{ inputs.mode }}
           ORCH_PROMPT_OR_COMMAND: ${{ inputs.prompt_or_command }}
@@ -75,7 +75,7 @@ jobs:
 
       - name: Write job summary
         if: always()
-        shell: powershell
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
         run: |
           $logPath = Join-Path "${{ github.workspace }}" "logs\orchestrator_run.log"
           "## VM Orchestrator Result" >> $env:GITHUB_STEP_SUMMARY
