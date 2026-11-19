@@ -12,6 +12,7 @@ target_processes:
 # Windows that represent the main 3ds Max workspace (never treated as unknown popups)
 ignore_windows:
   - name: "Main 3ds Max Workspace"
+    is_main_workspace: true
     title_regex: "^(Untitled|.*\\.max)\\s*-\\s*Autodesk 3ds Max (2025|2027)"
   - name: "Privacy Settings Inner WebView Host"
     process_contains: "3dsmax"

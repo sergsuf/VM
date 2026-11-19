@@ -1,4 +1,4 @@
-"""CLI entrypoint for 3ds Max 2025 VM automation."""
+"""CLI entrypoint for 3ds Max (2025/2027) VM automation."""
 
 from __future__ import annotations
 
@@ -9,9 +9,14 @@ from pathlib import Path
 import click
 
 from cli.ahk_bridge import AHKBridge
-from cli.max_deployer import DEFAULT_3DSMAX_EXE, deploy_scripts, launch_3dsmax
+from cli.max_deployer import (
+    deploy_scripts,
+    find_installed_3dsmax_exe,
+    get_default_3dsmax_exe,
+    launch_3dsmax,
+)
 from cli.ui_inspector import scan_windows
-from cli.watcher import WatcherConfig, wait_for_window, watch_loop
+from cli.watcher import WatcherConfig, is_process_running, wait_for_window, watch_loop
 
 DEFAULT_CONFIG = Path(__file__).resolve().parent.parent / "config" / "rules.yaml"
 
@@ -19,7 +24,7 @@ DEFAULT_CONFIG = Path(__file__).resolve().parent.parent / "config" / "rules.yaml
 @click.group(invoke_without_command=True)
 @click.pass_context
 def cli(ctx: click.Context) -> None:
-    """3ds Max 2025 VM Automation CLI (UIA Inspector + AutoHotkey v2)."""
+    """3ds Max (2025/2027) VM Automation CLI (UIA Inspector + AutoHotkey v2)."""
     if ctx.invoked_subcommand is None:
         ctx.invoke(watch)
 
@@ -120,15 +125,60 @@ def deploy_cmd(source: Path, version: str, startup: bool, dry_run: bool) -> None
 @cli.command()
 @click.option("--config", "-c", type=click.Path(exists=True, path_type=Path), default=DEFAULT_CONFIG)
 @click.option("--ahk-exe", type=click.Path(path_type=Path), default=None)
-@click.option("--timeout", "-t", type=float, default=20.0)
+@click.option("--max-exe", type=click.Path(path_type=Path), default=None, help="Explicit path to 3dsmax.exe.")
+@click.option("--version", default=None, help="3ds Max version year (e.g. 2027 or 2025). Auto-detected if omitted.")
+@click.option("--deploy/--no-deploy", default=False, help="Deploy scripts from max_scripts/ before launch.")
+@click.option("--launch/--no-launch", default=True, help="Launch 3ds Max if 3dsmax.exe is not already running.")
+@click.option("--timeout", "-t", type=float, default=60.0)
 @click.option("--dry-run", is_flag=True)
 def run(
     config: Path,
     ahk_exe: Path | None,
+    max_exe: Path | None,
+    version: str | None,
+    deploy: bool,
+    launch: bool,
     timeout: float,
     dry_run: bool,
 ) -> None:
-    """Watch an already-started 3ds Max (2025/2027) instance and handle popups (no deploy/launch)."""
+    """Launch 3ds Max (2027/2025) if not running, then watch and handle startup popups."""
+    resolved_version = version
+    resolved_exe = max_exe
+
+    if resolved_exe is None:
+        if resolved_version:
+            resolved_exe = get_default_3dsmax_exe(resolved_version)
+        else:
+            detected = find_installed_3dsmax_exe()
+            if detected:
+                resolved_version, resolved_exe = detected
+
+    if deploy:
+        scripts_dir = Path(__file__).resolve().parent.parent / "max_scripts"
+        if scripts_dir.exists():
+            deployed = deploy_scripts(
+                scripts_dir,
+                version=resolved_version or "2025",
+                startup=True,
+                dry_run=dry_run,
+            )
+            for p in deployed:
+                click.echo(f"[DEPLOY] -> {p}")
+
+    if launch:
+        if is_process_running(("3dsmax",)):
+            click.echo("[RUN] 3dsmax.exe is already running; attaching watcher...")
+        else:
+            if resolved_exe is None:
+                raise click.ClickException(
+                    "No installed 3ds Max (2027/2025) found. Pass --max-exe or --no-launch."
+                )
+            click.echo(f"[RUN] Launching 3ds Max: {resolved_exe}")
+            try:
+                launch_3dsmax(max_exe=resolved_exe, dry_run=dry_run)
+            except FileNotFoundError as exc:
+                raise click.ClickException(str(exc)) from exc
+
     cfg = WatcherConfig.from_yaml(config)
     ahk = AHKBridge(ahk_exe=ahk_exe, dry_run=dry_run)
     watch_loop(

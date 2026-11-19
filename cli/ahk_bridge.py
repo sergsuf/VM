@@ -65,8 +65,9 @@ class AHKBridge:
             check=False,
         )
         if result.returncode != 0:
+            err_msg = result.stderr.strip() or result.stdout.strip() or "no output"
             raise RuntimeError(
-                f"AHK command failed (code {result.returncode}): {result.stderr.strip()}"
+                f"AHK command failed (code {result.returncode}): {err_msg}"
             )
         return result.returncode
 

@@ -10,11 +10,23 @@ import zipfile
 from pathlib import Path
 
 DEFAULT_3DSMAX_EXE = Path(r"C:\Program Files\Autodesk\3ds Max 2025\3dsmax.exe")
+SUPPORTED_3DSMAX_VERSIONS = ("2027", "2025")
 
 
 def get_default_3dsmax_exe(version: str = "2025") -> Path:
     """Return the default 3dsmax.exe path for the given version year."""
     return Path(rf"C:\Program Files\Autodesk\3ds Max {version}\3dsmax.exe")
+
+
+def find_installed_3dsmax_exe(
+    versions: tuple[str, ...] = SUPPORTED_3DSMAX_VERSIONS,
+) -> tuple[str, Path] | None:
+    """Return (version, exe_path) for the first installed 3ds Max executable."""
+    for version in versions:
+        candidate = get_default_3dsmax_exe(version)
+        if candidate.exists():
+            return version, candidate
+    return None
 
 
 def get_max_user_enu_dir(version: str = "2025") -> Path:

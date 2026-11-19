@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 import ctypes
 from ctypes import wintypes
 import hashlib
@@ -28,8 +29,8 @@ def _ensure_default_desktop() -> None:
         if u32.GetUserObjectInformationW(hdesk, 2, buf, 512, None) and buf.value.lower() == "default":
             return
         hdef = u32.OpenDesktopW("Default", 0, False, 0x10000000)
-        if hdef:
-            u32.SetThreadDesktop(hdef)
+        if hdef and not u32.SetThreadDesktop(hdef):
+            u32.CloseDesktop(hdef)
     except Exception:
         pass
 
@@ -143,10 +144,10 @@ def _walk_controls(
     """Breadth-first walk over UIA subtree to collect interactive controls and texts."""
     elements: list[UIElement] = []
     texts: list[str] = []
-    queue: list[tuple[Any, int]] = [(root, 0)]
+    queue: deque[tuple[Any, int]] = deque([(root, 0)])
 
     while queue and len(elements) < max_elements:
-        node, depth = queue.pop(0)
+        node, depth = queue.popleft()
         if depth > max_depth:
             continue
 
@@ -319,6 +320,15 @@ def save_unknown_window_dump(
     return json_path, screenshot_path
 
 
+def _find_uia_control(win: Any, control_type: str, **criteria: Any) -> Any:
+    """Resolve a typed UIA child control under win with the given lookup criteria."""
+    if control_type == "CheckBoxControl":
+        return win.CheckBoxControl(searchDepth=10, **criteria)
+    if control_type == "ButtonControl":
+        return win.ButtonControl(searchDepth=10, **criteria)
+    return win.Control(searchDepth=10, **criteria)
+
+
 def uia_trigger_element(
     hwnd: int,
     element: UIElement,
@@ -334,21 +344,11 @@ def uia_trigger_element(
 
         target = None
         if element.automation_id:
-            if element.control_type == "CheckBoxControl":
-                cand = win.CheckBoxControl(AutomationId=element.automation_id, searchDepth=10)
-            elif element.control_type == "ButtonControl":
-                cand = win.ButtonControl(AutomationId=element.automation_id, searchDepth=10)
-            else:
-                cand = win.Control(AutomationId=element.automation_id, searchDepth=10)
+            cand = _find_uia_control(win, element.control_type, AutomationId=element.automation_id)
             if cand.Exists(2.0):
                 target = cand
         if target is None and element.name:
-            if element.control_type == "CheckBoxControl":
-                cand = win.CheckBoxControl(Name=element.name, searchDepth=10)
-            elif element.control_type == "ButtonControl":
-                cand = win.ButtonControl(Name=element.name, searchDepth=10)
-            else:
-                cand = win.Control(Name=element.name, searchDepth=10)
+            cand = _find_uia_control(win, element.control_type, Name=element.name)
             if cand.Exists(2.0):
                 target = cand
 

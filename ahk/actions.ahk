@@ -98,6 +98,6 @@ try {
             ExitApp 3
     }
 } catch as err {
-    FileAppend "AHK Error: " err.Message "`n", "*"
+    FileAppend "AHK Error: " err.Message "`n", "**"
     ExitApp 1
 }

@@ -236,7 +236,10 @@ def wait_for_window(
         time.sleep(poll_interval)
 
 
-def _is_process_running(process_substrings: tuple[str, ...] | list[str]) -> bool:
+DEFAULT_DUMP_DIR = Path(__file__).resolve().parent.parent / "logs" / "unknown_popups"
+
+
+def is_process_running(process_substrings: tuple[str, ...] | list[str]) -> bool:
     """Return True if any running process name contains one of the given substrings."""
     needles = [s.lower() for s in process_substrings if s]
     if not needles:
@@ -251,13 +254,23 @@ def _is_process_running(process_substrings: tuple[str, ...] | list[str]) -> bool
     return False
 
 
+def _is_main_workspace_window(
+    snapshot: WindowSnapshot,
+    ignore_windows: list[dict[str, Any]],
+) -> bool:
+    """Return True if snapshot matches the primary 3ds Max workspace window."""
+    explicit_main = [ig for ig in ignore_windows if ig.get("is_main_workspace")]
+    candidates = explicit_main if explicit_main else ignore_windows
+    return any(_matches_rule(snapshot, ig) for ig in candidates)
+
+
 def watch_loop(
     config: WatcherConfig,
     ahk: AHKBridge,
     poll_interval: float = 1.0,
     timeout_sec: float = 20.0,
     learn: bool = True,
-    dump_dir: Path = Path("logs/unknown_popups"),
+    dump_dir: Path = DEFAULT_DUMP_DIR,
     stop_on_main_ready: bool = False,
     ready_grace_sec: float = 10.0,
     only_rules: list[str] | None = None,
@@ -286,7 +299,7 @@ def watch_loop(
     while True:
         elapsed = time.monotonic() - start_time
         if timeout_sec > 0 and elapsed >= timeout_sec:
-            if stop_on_main_ready and _is_process_running(wait_while_running):
+            if stop_on_main_ready and is_process_running(wait_while_running):
                 if not extended_for_process:
                     extended_for_process = True
                     print(
@@ -301,8 +314,14 @@ def watch_loop(
                 break
 
         snapshots = scan_windows(process_filters=config.target_processes)
+        tick_matched_any_rule = False
+        main_workspace_title: str | None = None
+
         for snap in snapshots:
             is_ignored = any(_matches_rule(snap, ig) for ig in config.ignore_windows)
+            if _is_main_workspace_window(snap, config.ignore_windows):
+                main_workspace_title = snap.title
+
             matched = False
             for rule in active_rules:
                 if is_ignored and not rule.get("run_before_ignore", False):
@@ -316,6 +335,7 @@ def watch_loop(
                 now = time.monotonic()
                 if now - last_rule_hit.get(key, 0.0) < cooldown:
                     matched = True
+                    tick_matched_any_rule = True
                     break
 
                 action = rule.get("action", {})
@@ -323,6 +343,7 @@ def watch_loop(
                     last_rule_hit[key] = now
                     completed_rules.add(rule_name)
                     matched = True
+                    tick_matched_any_rule = True
                     if stop_after_all and len(completed_rules) >= len(active_rules):
                         print(
                             f"[WATCH] All target rules executed "
@@ -332,19 +353,6 @@ def watch_loop(
                     break
 
             if is_ignored:
-                if not matched and stop_on_main_ready:
-                    now_ready = time.monotonic()
-                    if main_ready_since is None:
-                        main_ready_since = now_ready
-                        print(
-                            f"[WATCH] Main window detected: '{snap.title}'. "
-                            f"Waiting {ready_grace_sec:.0f}s for delayed popups..."
-                        )
-                    elif now_ready - main_ready_since >= ready_grace_sec:
-                        print(f"[WATCH] Main window ready: '{snap.title}'. Stopping watcher.")
-                        return
-                else:
-                    main_ready_since = None
                 continue
 
             if not matched and learn:
@@ -359,5 +367,20 @@ def watch_loop(
                         f"  -> Saved UI dump: {json_p}"
                         + (f"\n  -> Saved screenshot: {png_p}" if png_p else "")
                     )
+
+        if stop_on_main_ready:
+            if main_workspace_title is not None and not tick_matched_any_rule:
+                now_ready = time.monotonic()
+                if main_ready_since is None:
+                    main_ready_since = now_ready
+                    print(
+                        f"[WATCH] Main window detected: '{main_workspace_title}'. "
+                        f"Waiting {ready_grace_sec:.0f}s for delayed popups..."
+                    )
+                elif now_ready - main_ready_since >= ready_grace_sec:
+                    print(f"[WATCH] Main window ready: '{main_workspace_title}'. Stopping watcher.")
+                    return
+            else:
+                main_ready_since = None
 
         time.sleep(poll_interval)
