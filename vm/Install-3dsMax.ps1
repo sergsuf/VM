@@ -29,8 +29,8 @@ $script:SupportedVersions = @('2024', '2025', '2026', '2027', '2028')
 $script:StatusDisplayTop = $null
 $script:StatusSpinnerPhase = 0
 $script:ActiveDisplayName = 'Autodesk 3ds Max'
-$script:ActiveLogPath = Join-Path (Join-Path $PSScriptRoot 'logs') '3dsMax-install.log'
-$script:ActiveStatusPath = Join-Path (Join-Path $PSScriptRoot 'logs') '3dsMax-status.txt'
+$script:ActiveLogPath = $null
+$script:ActiveStatusPath = $null
 
 function Get-VersionConfig {
     param(
@@ -137,11 +137,13 @@ function Write-Status {
         [string]$Message
     )
 
-    $statusDirectory = Split-Path -Parent $script:ActiveStatusPath
-    if ($statusDirectory -and -not (Test-Path -LiteralPath $statusDirectory)) {
-        New-Item -ItemType Directory -Path $statusDirectory -Force | Out-Null
+    if ($script:ActiveStatusPath) {
+        $statusDirectory = Split-Path -Parent $script:ActiveStatusPath
+        if ($statusDirectory -and -not (Test-Path -LiteralPath $statusDirectory)) {
+            New-Item -ItemType Directory -Path $statusDirectory -Force | Out-Null
+        }
+        Set-Content -LiteralPath $script:ActiveStatusPath -Value "$Percent%|$Message" -Encoding UTF8
     }
-    Set-Content -LiteralPath $script:ActiveStatusPath -Value "$Percent%|$Message" -Encoding UTF8
 
     try {
         $width = [Math]::Max(10, [Math]::Min(40, [Console]::WindowWidth - 35))
@@ -181,11 +183,13 @@ function Write-Log {
 
     $line = '{0:yyyy-MM-dd HH:mm:ss} [{1}] {2}' -f (Get-Date), $Level, $Message
     Write-Output $line
-    $logDirectory = [System.IO.Path]::GetDirectoryName($script:ActiveLogPath)
-    if ($logDirectory -and -not (Test-Path -LiteralPath $logDirectory)) {
-        New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
+    if ($script:ActiveLogPath) {
+        $logDirectory = [System.IO.Path]::GetDirectoryName($script:ActiveLogPath)
+        if ($logDirectory -and -not (Test-Path -LiteralPath $logDirectory)) {
+            New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
+        }
+        Add-Content -LiteralPath $script:ActiveLogPath -Value $line -Encoding UTF8
     }
-    Add-Content -LiteralPath $script:ActiveLogPath -Value $line -Encoding UTF8
 }
 
 function Resolve-UncPath {
