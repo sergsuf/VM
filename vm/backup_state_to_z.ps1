@@ -120,12 +120,20 @@ pause
 $maxAutoRestoreBat | Set-Content -Path (Join-Path $BackupRoot "restore_max_auto.bat") -Encoding ascii
 Write-Host "[Backup] Created launcher -> $BackupRoot\restore_max_auto.bat"
 
+$installMaxBat = @"
+@echo off
+title Autodesk 3ds Max Installer (2024-2028)
+"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "Z:\max-auto\vm\Install-3dsMax.ps1" -Interactive -PauseOnExit
+"@
+$installMaxBat | Set-Content -Path "Z:\2_Install_3dsMax.bat" -Encoding ascii
+Write-Host "[Backup] Created launcher -> Z:\2_Install_3dsMax.bat"
+
 $startMaxAutoBat = @"
 @echo off
 call "Z:\max-auto\run_max_auto.bat" %*
 "@
-$startMaxAutoBat | Set-Content -Path "Z:\2_Start_MaxAuto.bat" -Encoding ascii
-Write-Host "[Backup] Created launcher -> Z:\2_Start_MaxAuto.bat"
+$startMaxAutoBat | Set-Content -Path "Z:\3_Start_MaxAuto.bat" -Encoding ascii
+Write-Host "[Backup] Created launcher -> Z:\3_Start_MaxAuto.bat"
 
 $backupStateBat = @"
 @echo off
@@ -133,15 +141,7 @@ title Backup VM State to Z:\_vm_state
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "Z:\max-auto\vm\backup_state_to_z.ps1"
 pause
 "@
-$backupStateBat | Set-Content -Path "Z:\3_Backup_VM_State.bat" -Encoding ascii
-Write-Host "[Backup] Created launcher -> Z:\3_Backup_VM_State.bat"
-
-$installMaxBat = @"
-@echo off
-title Autodesk 3ds Max Installer (2024-2028)
-"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "Z:\max-auto\vm\Install-3dsMax.ps1" -Interactive -PauseOnExit
-"@
-$installMaxBat | Set-Content -Path "Z:\4_Install_3dsMax.bat" -Encoding ascii
-Write-Host "[Backup] Created single-window installer launcher -> Z:\4_Install_3dsMax.bat"
+$backupStateBat | Set-Content -Path "Z:\4_Backup_VM_State.bat" -Encoding ascii
+Write-Host "[Backup] Created launcher -> Z:\4_Backup_VM_State.bat"
 
 Write-Host "[Backup] Done!"

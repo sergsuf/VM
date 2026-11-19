@@ -7,20 +7,20 @@
 ```text
 Z:\
 ├── 1_Restore_Worker.bat    # Відновити стан ВМ з _vm_state + запустити GitHub Actions Runner (в 1 вікні)
-├── 2_Start_MaxAuto.bat     # Запустити max-auto (автоматично відновлює Python/venv з _vm_state при потребі)
-├── 3_Backup_VM_State.bat   # Зберегти поточний стан ВМ (раннер, Python, venv, ключі) у _vm_state
-├── 4_Install_3dsMax.bat    # Автопошук ISO (2024-2028) у Z:\3dsMax\Install та C:\..F:\Install + мультиустановка
+├── 2_Install_3dsMax.bat    # Автопошук ISO (2024-2028) у C:\..F:\Install та Z:\3dsMax\Install + мультиустановка
+├── 3_Start_MaxAuto.bat     # Запустити max-auto (автоматично відновлює Python/venv з _vm_state при потребі)
+├── 4_Backup_VM_State.bat   # Зберегти поточний стан ВМ (раннер, Python, venv, ключі) у _vm_state
 ├── 3dsMax\
-│   ├── Install\            # ISO-образ(и) та Install-3dsMax.ps1 / .bat
+│   ├── Install\            # ISO-образ(и)
 │   ├── 2025.3\             # 3dsmax.exe + ярлик
 │   └── 2027.2\             # 3dsmax.exe + ярлик
 ├── max-auto\               # Цей репозиторій
 │   ├── ahk\actions.ahk     # Виконавець дій (кліки, клавіші, DPI-aware) на AutoHotkey v2
 │   ├── cli\                # Python CLI (`max-auto`: inspect, watch, run, wait, deploy-scripts)
-│   ├── config\rules.yaml   # Правила проклікування вікон для 3ds Max 2025/2027 та Autodesk Licensing
+│   ├── config\rules.yaml   # Правила проклікування вікон для 3ds Max 2024–2028 та Autodesk Licensing
 │   ├── logs\               # Дампи та скріншоти невідомих попапів
 │   ├── max_scripts\        # Скрипти для деплою (.ms/.mse/.mcr/.mzp)
-│   ├── vm\                 # PowerShell-скрипти оркестратора, бекапу та відновлення ВМ
+│   ├── vm\                 # PowerShell-скрипти (Install-3dsMax, оркестратор, бекап та відновлення ВМ)
 │   └── run_max_auto.bat    # Інтерактивний лаунчер max-auto
 ├── tools\UAC\              # Увімкнення / вимкнення UAC
 └── _vm_state\              # Офлайн-бекап стану ВМ для переживання відкатів чекпойнтів Hyper-V
@@ -30,9 +30,10 @@ Z:\
 
 ## Швидкий старт після відкату чекпойнта Hyper-V
 
-- **Повне відновлення + запуск воркера:** подвійний клік на `Z:\1_Restore_Worker.bat`.
-- **Запуск `max-auto` (навіть якщо Python/venv ще немає на `C:\`):** подвійний клік на `Z:\2_Start_MaxAuto.bat` — скрипт автоматично відновить Python 3.12 і `C:\venvs\max-auto` з `Z:\_vm_state`.
-- **Оновлення бекапу на `Z:\_vm_state`:** подвійний клік на `Z:\3_Backup_VM_State.bat`.
+1. **Відновлення ВМ + запуск воркера:** `Z:\1_Restore_Worker.bat`
+2. **Установка 3ds Max (2024–2028):** `Z:\2_Install_3dsMax.bat`
+3. **Автопроклікування вікон (`max-auto`):** `Z:\3_Start_MaxAuto.bat`
+4. **Оновити бекап у `Z:\_vm_state`** *(лише якщо міняли воркер / Python / токени)*: `Z:\4_Backup_VM_State.bat`
 
 ---
 
