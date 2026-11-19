@@ -472,6 +472,16 @@ function Install-Single3dsMaxVersion {
 try {
     $tasks = New-Object System.Collections.Generic.List[object]
 
+    if ($ListOnly) {
+        $availableIsos = @(Find-Available3dsMaxIsos)
+        if ($availableIsos.Count -eq 0) {
+            Write-Host 'No 3ds Max (2024-2028) ISO files found.'
+        } else {
+            $availableIsos | Format-Table Version, DisplayName, SizeGB, IsInstalled, IsoPath -AutoSize | Out-String | Write-Host
+        }
+        exit 0
+    }
+
     if ($InstallTasks -and $InstallTasks.Count -gt 0) {
         foreach ($rawItem in $InstallTasks) {
             foreach ($entry in ($rawItem -split ';;')) {
