@@ -11,6 +11,7 @@ import click
 from cli.ahk_bridge import AHKBridge
 from cli.max_deployer import (
     deploy_scripts,
+    find_all_installed_3dsmax,
     find_installed_3dsmax_exe,
     get_default_3dsmax_exe,
     launch_3dsmax,
@@ -129,6 +130,7 @@ def deploy_cmd(source: Path, version: str, startup: bool, dry_run: bool) -> None
 @click.option("--version", default=None, help="3ds Max version year (e.g. 2027 or 2025). Auto-detected if omitted.")
 @click.option("--deploy/--no-deploy", default=False, help="Deploy scripts from max_scripts/ before launch.")
 @click.option("--launch/--no-launch", default=True, help="Launch 3ds Max if 3dsmax.exe is not already running.")
+@click.option("--interactive", "-i", is_flag=True, help="Interactively choose which installed 3ds Max version to launch.")
 @click.option("--timeout", "-t", type=float, default=60.0)
 @click.option("--dry-run", is_flag=True)
 def run(
@@ -138,12 +140,42 @@ def run(
     version: str | None,
     deploy: bool,
     launch: bool,
+    interactive: bool,
     timeout: float,
     dry_run: bool,
 ) -> None:
-    """Launch 3ds Max (2027/2025) if not running, then watch and handle startup popups."""
+    """Launch 3ds Max (2024-2028) if not running, then watch and handle startup popups."""
+    already_running = is_process_running(("3dsmax",))
     resolved_version = version
     resolved_exe = max_exe
+
+    if interactive and launch and not already_running and resolved_exe is None and not resolved_version:
+        installed = find_all_installed_3dsmax()
+        if not installed:
+            click.echo("[MAX-AUTO] Не знайдено встановлених версій 3ds Max (2024–2028). Вмикаю режим очікування (watch)...")
+            launch = False
+        elif len(installed) == 1:
+            ver, exe = installed[0]
+            if click.confirm(f"Запустити Autodesk 3ds Max {ver} зараз?", default=True):
+                resolved_version, resolved_exe = ver, exe
+            else:
+                click.echo("[MAX-AUTO] Запуск скасовано. Вмикаю режим очікування (watch)...")
+                launch = False
+        else:
+            click.echo("[MAX-AUTO] Встановлені версії 3ds Max:")
+            for idx, (ver, exe) in enumerate(installed, start=1):
+                click.echo(f"  [{idx}] Autodesk 3ds Max {ver} ({exe})")
+            click.echo("  [W] Лише очікувати (watch, без запуску)")
+            while True:
+                choice = click.prompt("Оберіть варіант", default="1").strip().lower()
+                if choice in ("w", "watch"):
+                    click.echo("[MAX-AUTO] Вмикаю режим очікування (watch)...")
+                    launch = False
+                    break
+                if choice.isdigit() and 1 <= int(choice) <= len(installed):
+                    resolved_version, resolved_exe = installed[int(choice) - 1]
+                    break
+                click.echo(f"Введіть число від 1 до {len(installed)} або W.")
 
     if resolved_exe is None:
         if resolved_version:
@@ -166,12 +198,12 @@ def run(
                 click.echo(f"[DEPLOY] -> {p}")
 
     if launch:
-        if is_process_running(("3dsmax",)):
+        if already_running:
             click.echo("[RUN] 3dsmax.exe is already running; attaching watcher...")
         else:
             if resolved_exe is None:
                 raise click.ClickException(
-                    "No installed 3ds Max (2027/2025) found. Pass --max-exe or --no-launch."
+                    "No installed 3ds Max (2024-2028) found. Pass --max-exe or --no-launch."
                 )
             click.echo(f"[RUN] Launching 3ds Max: {resolved_exe}")
             try:

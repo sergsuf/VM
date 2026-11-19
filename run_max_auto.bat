@@ -28,15 +28,7 @@ tasklist /FI "IMAGENAME eq 3dsmax.exe" 2>nul | find /I "3dsmax.exe" >nul
 if not errorlevel 1 goto :max_running
 
 echo [MAX-AUTO] Процес 3dsmax.exe зараз не запущений.
-choice /C YN /M "Запустити 3ds Max (2025/2027) зараз"
-if errorlevel 2 goto :watch_only
-echo [MAX-AUTO] Запуск 3ds Max (2025/2027) та відстеження вікон...
-set "ARGS=run"
-goto :run_cmd
-
-:watch_only
-echo [MAX-AUTO] Запуск 3ds Max скасовано. Вмикаю режим очікування (watch)...
-set "ARGS=watch --stop-on-ready"
+set "ARGS=run --interactive"
 goto :run_cmd
 
 :max_running

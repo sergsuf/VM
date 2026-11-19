@@ -18,6 +18,18 @@ def get_default_3dsmax_exe(version: str = "2025") -> Path:
     return Path(rf"C:\Program Files\Autodesk\3ds Max {version}\3dsmax.exe")
 
 
+def find_all_installed_3dsmax(
+    versions: tuple[str, ...] = ("2024", "2025", "2026", "2027", "2028"),
+) -> list[tuple[str, Path]]:
+    """Return list of (version, exe_path) for all installed 3ds Max versions."""
+    installed: list[tuple[str, Path]] = []
+    for version in versions:
+        candidate = get_default_3dsmax_exe(version)
+        if candidate.exists():
+            installed.append((version, candidate))
+    return installed
+
+
 def find_installed_3dsmax_exe(
     versions: tuple[str, ...] = SUPPORTED_3DSMAX_VERSIONS,
 ) -> tuple[str, Path] | None:
