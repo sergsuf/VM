@@ -136,19 +136,12 @@ pause
 $backupStateBat | Set-Content -Path "Z:\3_Backup_VM_State.bat" -Encoding ascii
 Write-Host "[Backup] Created launcher -> Z:\3_Backup_VM_State.bat"
 
-$installPs1Src = Join-Path $PSScriptRoot "Install-3dsMax.ps1"
-if (Test-Path $installPs1Src) {
-    New-Item -ItemType Directory -Force -Path "Z:\3dsMax\Install" | Out-Null
-    Copy-Item -Path $installPs1Src -Destination "Z:\3dsMax\Install\Install-3dsMax.ps1" -Force
-}
-
 $installMaxBat = @"
 @echo off
 title Autodesk 3ds Max Installer (2024-2028)
-"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "Z:\3dsMax\Install\Install-3dsMax.ps1" -Interactive -PauseOnExit
+"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "Z:\max-auto\vm\Install-3dsMax.ps1" -Interactive -PauseOnExit
 "@
 $installMaxBat | Set-Content -Path "Z:\4_Install_3dsMax.bat" -Encoding ascii
-$installMaxBat | Set-Content -Path "Z:\3dsMax\Install\Install-3dsMax.bat" -Encoding ascii
-Write-Host "[Backup] Created single-window installer launchers -> Z:\4_Install_3dsMax.bat & Z:\3dsMax\Install\Install-3dsMax.bat"
+Write-Host "[Backup] Created single-window installer launcher -> Z:\4_Install_3dsMax.bat"
 
 Write-Host "[Backup] Done!"

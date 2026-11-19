@@ -77,9 +77,18 @@ function Get-IsoSearchDirectories {
         $rawDirs.Add("${driveLetter}:\Install")
         $rawDirs.Add("${driveLetter}:\")
     }
-    if ($PSScriptRoot) { $rawDirs.Add($PSScriptRoot) }
     $rawDirs.Add('Z:\3dsMax\Install')
     $rawDirs.Add('Z:\')
+    if ($PSScriptRoot) {
+        $rawDirs.Add($PSScriptRoot)
+        # If running from <share>\max-auto\vm via UNC after elevation, also scan <share>\3dsMax\Install
+        $parent1 = Split-Path -Parent $PSScriptRoot
+        $parent2 = if ($parent1) { Split-Path -Parent $parent1 } else { $null }
+        if ($parent2) {
+            $rawDirs.Add((Join-Path $parent2 '3dsMax\Install'))
+            $rawDirs.Add($parent2)
+        }
+    }
 
     foreach ($dir in $rawDirs) {
         if (-not $dir) { continue }
