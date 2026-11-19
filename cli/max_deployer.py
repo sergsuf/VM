@@ -1,14 +1,20 @@
-"""Deploy MAXScript / MacroScript / MZP packages and launch 3ds Max 2025."""
+"""Deploy MAXScript / MacroScript / MZP packages and launch 3ds Max (2025/2027)."""
 
 from __future__ import annotations
 
 import os
 import shutil
 import subprocess
+import sys
 import zipfile
 from pathlib import Path
 
 DEFAULT_3DSMAX_EXE = Path(r"C:\Program Files\Autodesk\3ds Max 2025\3dsmax.exe")
+
+
+def get_default_3dsmax_exe(version: str = "2025") -> Path:
+    """Return the default 3dsmax.exe path for the given version year."""
+    return Path(rf"C:\Program Files\Autodesk\3ds Max {version}\3dsmax.exe")
 
 
 def get_max_user_enu_dir(version: str = "2025") -> Path:
@@ -84,4 +90,15 @@ def launch_3dsmax(
     if not max_exe.exists():
         raise FileNotFoundError(f"3ds Max executable not found: {max_exe}")
 
-    return subprocess.Popen(cmd)
+    startupinfo = None
+    if sys.platform == "win32":
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.lpDesktop = r"winsta0\default"
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = 1  # SW_SHOWNORMAL
+
+    return subprocess.Popen(
+        cmd,
+        cwd=str(max_exe.parent),
+        startupinfo=startupinfo,
+    )

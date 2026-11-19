@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 DEFAULT_AHK_PATHS = [
@@ -51,11 +52,16 @@ class AHKBridge:
                 f"AutoHotkey v2 executable not found: {self.ahk_exe}. "
                 "Install AutoHotkey v2 or pass --ahk-exe."
             )
+        startupinfo = None
+        if sys.platform == "win32":
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.lpDesktop = r"winsta0\default"
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
             timeout=timeout,
+            startupinfo=startupinfo,
             check=False,
         )
         if result.returncode != 0:
@@ -66,6 +72,12 @@ class AHKBridge:
 
     def click(self, x: int, y: int, hwnd: int = 0) -> None:
         self._run("click", str(x), str(y), str(hwnd))
+
+    def ctrl_click(self, hwnd: int, target_or_x: str | int, y: int | None = None) -> None:
+        if y is not None:
+            self._run("ctrlclick", str(hwnd), str(target_or_x), str(y))
+        else:
+            self._run("ctrlclick", str(hwnd), str(target_or_x))
 
     def send_keys(self, keys: str, hwnd: int = 0) -> None:
         self._run("send", keys, str(hwnd))

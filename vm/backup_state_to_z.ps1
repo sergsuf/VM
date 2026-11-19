@@ -76,25 +76,64 @@ $py312Src = Join-Path $env:LOCALAPPDATA "Programs\Python\Python312"
 Copy-DirMirror -Source $py312Src -Dest (Join-Path $BackupRoot "python312")
 Copy-DirMirror -Source "C:\venvs\max-auto" -Dest (Join-Path $BackupRoot "venv_max_auto")
 
-# 6. Copy restore script and create 1-click .bat launchers on Z:\_vm_state
+# 6. Copy restore script and create 1-click .bat launchers (single-window runner!)
 $restorePs1 = Join-Path $PSScriptRoot "restore_state_from_z.ps1"
 if (Test-Path $restorePs1) {
     Copy-Item -Path $restorePs1 -Destination (Join-Path $BackupRoot "restore_state_from_z.ps1") -Force
 }
 
-$batContent = @"
+$workerBatContent = @"
 @echo off
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0restore_state_from_z.ps1"
-pause
+title GitHub Actions Worker (AUTO)
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "Z:\_vm_state\restore_state_from_z.ps1" -NoStartRunner
+if errorlevel 1 (
+    echo [ERROR] Restore failed!
+    pause
+    exit /b 1
+)
+tasklist /FI "IMAGENAME eq Runner.Listener.exe" 2>nul | find /I "Runner.Listener.exe" >nul
+if not errorlevel 1 (
+    echo [Restore] Runner.Listener.exe is already running.
+    pause
+    exit /b 0
+)
+if exist "C:\actions-runner\run.cmd" (
+    echo [Restore] Starting interactive GitHub Actions Runner...
+    cd /d C:\actions-runner
+    call C:\actions-runner\run.cmd
+) else (
+    echo [ERROR] C:\actions-runner\run.cmd not found!
+    pause
+    exit /b 1
+)
 "@
-$batContent | Set-Content -Path (Join-Path $BackupRoot "restore_worker.bat") -Encoding ascii
-Write-Host "[Backup] Created 1-click launcher -> $BackupRoot\restore_worker.bat"
+$workerBatContent | Set-Content -Path (Join-Path $BackupRoot "restore_worker.bat") -Encoding ascii
+$workerBatContent | Set-Content -Path "Z:\1_Restore_Worker.bat" -Encoding ascii
+Write-Host "[Backup] Created single-window worker launchers -> $BackupRoot\restore_worker.bat & Z:\1_Restore_Worker.bat"
 
-$maxAutoBatContent = @"
+$maxAutoRestoreBat = @"
 @echo off
+title Restore Python & max-auto venv
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0restore_state_from_z.ps1" -OnlyPythonVenv -NoStartRunner
 pause
 "@
-$maxAutoBatContent | Set-Content -Path (Join-Path $BackupRoot "restore_max_auto.bat") -Encoding ascii
-Write-Host "[Backup] Created 1-click launcher -> $BackupRoot\restore_max_auto.bat"
+$maxAutoRestoreBat | Set-Content -Path (Join-Path $BackupRoot "restore_max_auto.bat") -Encoding ascii
+Write-Host "[Backup] Created launcher -> $BackupRoot\restore_max_auto.bat"
+
+$startMaxAutoBat = @"
+@echo off
+call "Z:\max-auto\run_max_auto.bat" %*
+"@
+$startMaxAutoBat | Set-Content -Path "Z:\2_Start_MaxAuto.bat" -Encoding ascii
+Write-Host "[Backup] Created launcher -> Z:\2_Start_MaxAuto.bat"
+
+$backupStateBat = @"
+@echo off
+title Backup VM State to Z:\_vm_state
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "Z:\max-auto\vm\backup_state_to_z.ps1"
+pause
+"@
+$backupStateBat | Set-Content -Path "Z:\3_Backup_VM_State.bat" -Encoding ascii
+Write-Host "[Backup] Created launcher -> Z:\3_Backup_VM_State.bat"
+
 Write-Host "[Backup] Done!"

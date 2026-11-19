@@ -1,7 +1,8 @@
 #Requires AutoHotkey v2.0
 #SingleInstance Force
 
-; Ensure all coordinates passed from Python UIA are treated as absolute screen coordinates
+; Match Python UIA Per-Monitor v2 DPI awareness and screen coordinates
+try DllCall("SetProcessDpiAwarenessContext", "ptr", -4, "ptr")
 CoordMode "Mouse", "Screen"
 SetMouseDelay 30
 SetKeyDelay 30
@@ -36,6 +37,24 @@ try {
             MouseMove x, y, 2
             Sleep 50
             Click x, y
+            ExitApp 0
+
+        case "ctrlclick":
+            ; ctrlclick <hwnd> <controlNameOrClassNN>  OR  ctrlclick <hwnd> <clientX> <clientY>
+            if A_Args.Length < 3 {
+                ExitApp 2
+            }
+            winSpec := "ahk_id " A_Args[2]
+            if !WinExist(winSpec) {
+                ExitApp 4
+            }
+            if A_Args.Length >= 4 {
+                cx := Integer(A_Args[3])
+                cy := Integer(A_Args[4])
+                ControlClick "X" cx " Y" cy, winSpec, , "Left", 1, "NA"
+            } else {
+                ControlClick A_Args[3], winSpec, , "Left", 1, "NA"
+            }
             ExitApp 0
 
         case "send":

@@ -57,6 +57,9 @@ try {
     if (Test-Path $venvActivate) {
         Write-Host "[Orchestrator] Activating .venv..."
         . $venvActivate
+    } elseif (Test-Path "C:\venvs\max-auto\Scripts\Activate.ps1") {
+        Write-Host "[Orchestrator] Activating C:\venvs\max-auto..."
+        . "C:\venvs\max-auto\Scripts\Activate.ps1"
     }
 
     switch ($Mode) {
