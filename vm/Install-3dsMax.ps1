@@ -17,7 +17,8 @@ param(
     [int]$StatusRefreshSeconds = 2,
     [switch]$SelectIso,
     [switch]$Interactive,
-    [switch]$KeepIsoMounted
+    [switch]$KeepIsoMounted,
+    [switch]$ListOnly
 )
 
 Set-StrictMode -Version Latest
