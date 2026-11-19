@@ -63,14 +63,13 @@ function Get-IsoSearchDirectories {
     $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
 
     $rawDirs = New-Object System.Collections.Generic.List[string]
-    if ($PSScriptRoot) { $rawDirs.Add($PSScriptRoot) }
-    $rawDirs.Add('Z:\3dsMax\Install')
-    $rawDirs.Add('Z:\')
-
     foreach ($driveLetter in @('C', 'D', 'E', 'F')) {
         $rawDirs.Add("${driveLetter}:\Install")
         $rawDirs.Add("${driveLetter}:\")
     }
+    if ($PSScriptRoot) { $rawDirs.Add($PSScriptRoot) }
+    $rawDirs.Add('Z:\3dsMax\Install')
+    $rawDirs.Add('Z:\')
 
     foreach ($dir in $rawDirs) {
         if (-not $dir) { continue }
@@ -88,7 +87,7 @@ function Get-IsoSearchDirectories {
 
 function Find-Available3dsMaxIsos {
     $found = New-Object System.Collections.Generic.List[object]
-    $seenPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    $seenNames = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
 
     foreach ($dir in (Get-IsoSearchDirectories)) {
         $isoFiles = Get-ChildItem -LiteralPath $dir -Filter '*.iso' -File -ErrorAction SilentlyContinue
@@ -96,7 +95,7 @@ function Find-Available3dsMaxIsos {
             if ($file.Name -notmatch '(?i)3ds[\s._-]*max') { continue }
             $ver = Get-VersionFromFileName -FilePath $file.Name
             if (-not $ver -or ($script:SupportedVersions -notcontains $ver)) { continue }
-            if (-not $seenPaths.Add($file.FullName)) { continue }
+            if (-not $seenNames.Add($file.Name)) { continue }
 
             $cfg = Get-VersionConfig -TargetVersion $ver
             $found.Add([PSCustomObject]@{
