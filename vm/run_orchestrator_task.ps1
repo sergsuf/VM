@@ -75,8 +75,8 @@ try {
         }
         "max_auto" {
             $cmdArgs = $PromptOrCommand.Trim() -split "\s+"
-            Write-OrchLog "[Orchestrator] Running: max-auto $($cmdArgs -join ' ')"
-            & max-auto @cmdArgs 2>&1 | Write-OrchLog
+            Write-OrchLog "[Orchestrator] Running: python -u -m cli.main $($cmdArgs -join ' ')"
+            & python -u -m cli.main @cmdArgs 2>&1 | Write-OrchLog
             $exitCode = $LASTEXITCODE
         }
         "powershell" {
