@@ -18,7 +18,8 @@ param(
     [switch]$SelectIso,
     [switch]$Interactive,
     [switch]$KeepIsoMounted,
-    [switch]$ListOnly
+    [switch]$ListOnly,
+    [switch]$PauseOnExit
 )
 
 Set-StrictMode -Version Latest
@@ -28,21 +29,30 @@ $script:SupportedVersions = @('2024', '2025', '2026', '2027', '2028')
 $script:StatusDisplayTop = $null
 $script:StatusSpinnerPhase = 0
 $script:ActiveDisplayName = 'Autodesk 3ds Max'
-$script:ActiveLogPath = 'C:\Install\3dsMax-install.log'
-$script:ActiveStatusPath = 'C:\Install\3dsMax-status.txt'
+$script:ActiveLogPath = Join-Path (Join-Path $PSScriptRoot 'logs') '3dsMax-install.log'
+$script:ActiveStatusPath = Join-Path (Join-Path $PSScriptRoot 'logs') '3dsMax-status.txt'
 
 function Get-VersionConfig {
     param(
         [Parameter(Mandatory = $true)]
         [ValidateSet('2024', '2025', '2026', '2027', '2028')]
-        [string]$TargetVersion
+        [string]$TargetVersion,
+        [string]$TargetIsoPath = ''
     )
+    $baseDir = if ($TargetIsoPath) {
+        Split-Path -Parent $TargetIsoPath
+    } elseif ($PSScriptRoot) {
+        $PSScriptRoot
+    } else {
+        'C:\Install'
+    }
+    $logDir = Join-Path $baseDir 'logs'
     return @{
         Version          = $TargetVersion
         DisplayName      = "Autodesk 3ds Max $TargetVersion"
         MaxExecutable    = "C:\Program Files\Autodesk\3ds Max $TargetVersion\3dsmax.exe"
-        LogPath          = "C:\Install\3dsMax-$TargetVersion-install.log"
-        StatusPath       = "C:\Install\3dsMax-$TargetVersion-status.txt"
+        LogPath          = Join-Path $logDir "3dsMax-$TargetVersion-install.log"
+        StatusPath       = Join-Path $logDir "3dsMax-$TargetVersion-status.txt"
         TempInstallerLog = "3dsMax_${TargetVersion}_install.log"
         EstimatedFiles   = 19000
     }
@@ -311,7 +321,7 @@ function Install-Single3dsMaxVersion {
         [Parameter(Mandatory = $true)][string]$TargetIsoPath
     )
 
-    $cfg = Get-VersionConfig -TargetVersion $TargetVersion
+    $cfg = Get-VersionConfig -TargetVersion $TargetVersion -TargetIsoPath $TargetIsoPath
     $script:StatusDisplayTop = $null
     $script:StatusSpinnerPhase = 0
     $script:ActiveDisplayName = $cfg.DisplayName
@@ -482,6 +492,27 @@ try {
         exit 0
     }
 
+    if ($Interactive -and -not (Test-IsAdministrator)) {
+        $uncScript = Resolve-UncPath $PSCommandPath
+        $psExe = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+        $argList = @(
+            '-NoProfile',
+            '-ExecutionPolicy', 'Bypass',
+            '-File', "`"$uncScript`"",
+            '-Interactive',
+            '-InstallerTimeoutSeconds', $InstallerTimeoutSeconds,
+            '-StatusRefreshSeconds', $StatusRefreshSeconds
+        )
+        if ($Version) { $argList += @('-Version', $Version) }
+        if ($IsoPath) { $argList += @('-IsoPath', "`"$(Resolve-UncPath $IsoPath)`"") }
+        if ($SelectIso) { $argList += '-SelectIso' }
+        if ($KeepIsoMounted) { $argList += '-KeepIsoMounted' }
+        if ($PauseOnExit) { $argList += '-PauseOnExit' }
+
+        Start-Process -FilePath $psExe -ArgumentList ($argList -join ' ') -Verb RunAs
+        exit 0
+    }
+
     if ($InstallTasks -and $InstallTasks.Count -gt 0) {
         foreach ($rawItem in $InstallTasks) {
             foreach ($entry in ($rawItem -split ';;')) {
@@ -549,7 +580,6 @@ try {
         }) -join ';;'
         $argStr = "-NoProfile -ExecutionPolicy Bypass -File `"$uncScript`" -InstallTasks `"$tasksPayload`" -InstallerTimeoutSeconds $InstallerTimeoutSeconds -StatusRefreshSeconds $StatusRefreshSeconds"
         if ($KeepIsoMounted) { $argStr += ' -KeepIsoMounted' }
-        Write-Log "Requesting elevation for $($tasks.Count) installation task(s)..."
         $elevated = Start-Process -FilePath $psExe -ArgumentList $argStr -Verb RunAs -Wait -PassThru
         exit $elevated.ExitCode
     }
@@ -564,6 +594,11 @@ try {
         Install-Single3dsMaxVersion -TargetVersion $task.Version -TargetIsoPath $task.IsoPath
     }
 
+    Write-Host ''
+    Write-Host "Done. Log saved to: $($script:ActiveLogPath)" -ForegroundColor Green
+    if ($PauseOnExit) {
+        Read-Host 'Press Enter to close' | Out-Null
+    }
     exit 0
 }
 catch {
@@ -572,6 +607,10 @@ catch {
     Write-Log $_.Exception.Message 'ERROR'
     if ($_.InvocationInfo -and $_.InvocationInfo.Line) {
         Write-Log "Command: $($_.InvocationInfo.Line.Trim())" 'ERROR'
+    }
+    if ($PauseOnExit) {
+        Write-Host ''
+        Read-Host 'Installation failed. Press Enter to close' | Out-Null
     }
     exit 1
 }

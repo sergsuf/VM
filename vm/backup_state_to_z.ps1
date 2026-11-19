@@ -144,21 +144,11 @@ if (Test-Path $installPs1Src) {
 
 $installMaxBat = @"
 @echo off
-setlocal
 title Autodesk 3ds Max Installer (2024-2028)
-"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "Z:\3dsMax\Install\Install-3dsMax.ps1" -Interactive
-set "RC=%ERRORLEVEL%"
-echo.
-if not "%RC%"=="0" (
-    echo Installation failed with exit code %RC%. Check logs in C:\Install\
-) else (
-    echo Done.
-)
-pause
-exit /b %RC%
+"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "Z:\3dsMax\Install\Install-3dsMax.ps1" -Interactive -PauseOnExit
 "@
 $installMaxBat | Set-Content -Path "Z:\4_Install_3dsMax.bat" -Encoding ascii
 $installMaxBat | Set-Content -Path "Z:\3dsMax\Install\Install-3dsMax.bat" -Encoding ascii
-Write-Host "[Backup] Created installer launchers -> Z:\4_Install_3dsMax.bat & Z:\3dsMax\Install\Install-3dsMax.bat"
+Write-Host "[Backup] Created single-window installer launchers -> Z:\4_Install_3dsMax.bat & Z:\3dsMax\Install\Install-3dsMax.bat"
 
 Write-Host "[Backup] Done!"
