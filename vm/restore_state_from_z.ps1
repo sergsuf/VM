@@ -6,7 +6,8 @@
 param(
     [string]$BackupRoot = "Z:\_vm_state",
     [string]$RunnerDir = "C:\actions-runner",
-    [switch]$NoStartRunner
+    [switch]$NoStartRunner,
+    [switch]$OnlyPythonVenv
 )
 
 $ErrorActionPreference = "Stop"
@@ -37,6 +38,28 @@ function Restore-DirMirror {
     }
     $global:LASTEXITCODE = 0
     Write-Host "[Restore] Restored $Source -> $Dest"
+}
+
+# 0. Restore Python 3.12 & C:\venvs\max-auto
+$py312Dest = Join-Path $env:LOCALAPPDATA "Programs\Python\Python312"
+Restore-DirMirror -Source (Join-Path $BackupRoot "python312") -Dest $py312Dest
+if (Test-Path $py312Dest) {
+    $pyScripts = Join-Path $py312Dest "Scripts"
+    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    foreach ($p in @($py312Dest, $pyScripts)) {
+        if ($userPath -notlike "*$p*") {
+            $userPath = if ($userPath) { "$userPath;$p" } else { $p }
+            [Environment]::SetEnvironmentVariable("Path", $userPath, "User")
+            $env:Path = "$env:Path;$p"
+            Write-Host "[Restore] Added $p to User PATH"
+        }
+    }
+}
+Restore-DirMirror -Source (Join-Path $BackupRoot "venv_max_auto") -Dest "C:\venvs\max-auto"
+
+if ($OnlyPythonVenv) {
+    Write-Host "[Restore] Python & C:\venvs\max-auto restore complete!"
+    return
 }
 
 # 1. Restore GitHub Actions Runner

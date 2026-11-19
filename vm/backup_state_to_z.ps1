@@ -71,7 +71,12 @@ if (Test-Path $gitCfg) {
     Write-Host "[Backup] Saved $gitCfg"
 }
 
-# 5. Copy restore script and create 1-click .bat launcher on Z:\_vm_state
+# 5. Python 3.12 & C:\venvs\max-auto
+$py312Src = Join-Path $env:LOCALAPPDATA "Programs\Python\Python312"
+Copy-DirMirror -Source $py312Src -Dest (Join-Path $BackupRoot "python312")
+Copy-DirMirror -Source "C:\venvs\max-auto" -Dest (Join-Path $BackupRoot "venv_max_auto")
+
+# 6. Copy restore script and create 1-click .bat launchers on Z:\_vm_state
 $restorePs1 = Join-Path $PSScriptRoot "restore_state_from_z.ps1"
 if (Test-Path $restorePs1) {
     Copy-Item -Path $restorePs1 -Destination (Join-Path $BackupRoot "restore_state_from_z.ps1") -Force
@@ -84,4 +89,12 @@ pause
 "@
 $batContent | Set-Content -Path (Join-Path $BackupRoot "restore_worker.bat") -Encoding ascii
 Write-Host "[Backup] Created 1-click launcher -> $BackupRoot\restore_worker.bat"
+
+$maxAutoBatContent = @"
+@echo off
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0restore_state_from_z.ps1" -OnlyPythonVenv -NoStartRunner
+pause
+"@
+$maxAutoBatContent | Set-Content -Path (Join-Path $BackupRoot "restore_max_auto.bat") -Encoding ascii
+Write-Host "[Backup] Created 1-click launcher -> $BackupRoot\restore_max_auto.bat"
 Write-Host "[Backup] Done!"
