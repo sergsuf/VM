@@ -13,7 +13,7 @@ target_processes:
 ignore_windows:
   - name: "Main 3ds Max Workspace"
     is_main_workspace: true
-    title_regex: "^(Untitled|.*\\.max)\\s*-\\s*Autodesk 3ds Max (2025|2027)"
+    title_regex: "^(Untitled|.*\\.max)\\s*-\\s*Autodesk 3ds Max (2024|2025|2026|2027|2028)"
   - name: "Privacy Settings Inner WebView Host"
     process_contains: "3dsmax"
     title_regex: "^$"
@@ -31,9 +31,9 @@ rules:
       control_names: ["OK", "I Agree", "Agree", "Accept", "Continue", "Close"]
     cooldown_sec: 3
 
-  - name: "Privacy Settings (3ds Max 2027 WebView)"
+  - name: "Privacy Settings (3ds Max 2026+ WebView)"
     process_contains: "3dsmax"
-    title_regex: "^3dsMax/2027"
+    title_regex: "^3dsMax/(2026|2027|2028)"
     text_contains: ["Privacy Settings"]
     action:
       type: "click_relative"

@@ -1,6 +1,6 @@
-# 3ds Max (2025 / 2027) VM Automation (Python CLI + AutoHotkey v2)
+# 3ds Max (2024–2028) VM Automation (Python CLI + AutoHotkey v2)
 
-Інструментарій для автоматизованого тестування першого запуску, проклікування спливаючих вікон та встановлення скриптів у **Autodesk 3ds Max 2025 / 2027** всередині віртуальної машини (**Hyper-V**).
+Інструментарій для автоматизованого встановлення, тестування першого запуску, проклікування спливаючих вікон та деплою скриптів у **Autodesk 3ds Max 2024–2028** всередині віртуальної машини (**Hyper-V**).
 
 ## Структура диска `Z:\` на ВМ
 
@@ -9,8 +9,9 @@ Z:\
 ├── 1_Restore_Worker.bat    # Відновити стан ВМ з _vm_state + запустити GitHub Actions Runner (в 1 вікні)
 ├── 2_Start_MaxAuto.bat     # Запустити max-auto (автоматично відновлює Python/venv з _vm_state при потребі)
 ├── 3_Backup_VM_State.bat   # Зберегти поточний стан ВМ (раннер, Python, venv, ключі) у _vm_state
+├── 4_Install_3dsMax.bat    # Автопошук ISO (2024-2028) у Z:\3dsMax\Install та C:\..F:\Install + мультиустановка
 ├── 3dsMax\
-│   ├── Install\            # ISO-образ та інсталятор Install-3dsMax.*
+│   ├── Install\            # ISO-образ(и) та Install-3dsMax.ps1 / .bat
 │   ├── 2025.3\             # 3dsmax.exe + ярлик
 │   └── 2027.2\             # 3dsmax.exe + ярлик
 ├── max-auto\               # Цей репозиторій

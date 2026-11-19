@@ -10,7 +10,7 @@ import zipfile
 from pathlib import Path
 
 DEFAULT_3DSMAX_EXE = Path(r"C:\Program Files\Autodesk\3ds Max 2025\3dsmax.exe")
-SUPPORTED_3DSMAX_VERSIONS = ("2027", "2025")
+SUPPORTED_3DSMAX_VERSIONS = ("2028", "2027", "2026", "2025", "2024")
 
 
 def get_default_3dsmax_exe(version: str = "2025") -> Path:
