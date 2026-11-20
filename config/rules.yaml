@@ -18,6 +18,7 @@ ignore_windows:
     is_main_workspace: false
     skip_scan: true
     process_contains: "3dsmax"
+    class_name_regex: "QWindowIcon$"
     title_regex: "^3dsMax/(2024|2025|2026|2027|2028)"
 
 # Ordered list of popup handling rules (first match wins)
@@ -83,12 +84,16 @@ rules:
       type: "sequence"
       steps:
         - type: "click_control"
-          automation_id: "WelcomeScreenDialog.mShowWelcomeScreenBox"
+          automation_ids:
+            - "QMaxApplication.WelcomeScreenDialog.mShowWelcomeScreenBox"
+            - "WelcomeScreenDialog.mShowWelcomeScreenBox"
           control_names: ["Show this Welcome Screen at startup"]
           state: 0
           delay_after_sec: 0.3
         - type: "click_control"
-          automation_id: "WelcomeScreenDialog.closeButton"
+          automation_ids:
+            - "QMaxApplication.WelcomeScreenDialog.closeButton"
+            - "WelcomeScreenDialog.closeButton"
           control_names: ["x", "Close", "Skip", "Continue", "Start 3ds Max", "OK"]
     cooldown_sec: 3
 

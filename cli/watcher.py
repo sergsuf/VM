@@ -49,6 +49,10 @@ def _matches_win32_predicates(snapshot: WindowSnapshot, rule: dict[str, Any]) ->
     if class_name and snapshot.class_name.lower() != class_name.lower():
         return False
 
+    class_name_regex = rule.get("class_name_regex")
+    if class_name_regex and not re.search(class_name_regex, snapshot.class_name):
+        return False
+
     title_regex = rule.get("title_regex")
     if title_regex:
         if not re.search(title_regex, snapshot.title):
@@ -107,8 +111,10 @@ def _find_target_element(
     snapshot: WindowSnapshot,
     action: dict[str, Any],
 ) -> UIElement | None:
-    auto_id = action.get("automation_id")
-    if auto_id:
+    auto_ids: list[str] = list(action.get("automation_ids") or [])
+    if action.get("automation_id"):
+        auto_ids.insert(0, action["automation_id"])
+    for auto_id in auto_ids:
         for el in snapshot.elements:
             if el.is_enabled and el.automation_id == auto_id:
                 return el
