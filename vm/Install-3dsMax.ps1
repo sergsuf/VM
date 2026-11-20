@@ -235,7 +235,20 @@ function Select-IsoFileDialog {
 
 function Test-InstallerProcessRunning {
     $installerProcesses = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -in @('Setup.exe', 'msiexec.exe') }
+        Where-Object {
+            if ($_.Name -in @('Setup.exe', 'Installer.exe')) {
+                return $true
+            }
+            if ($_.Name -eq 'msiexec.exe') {
+                $cmd = [string]$_.CommandLine
+                # Ignore idle Windows Installer service host (msiexec.exe /V)
+                if ($cmd -match '(?i)^\s*"?[^"]*msiexec(?:\.exe)?"?\s+[/\-]V\s*$') {
+                    return $false
+                }
+                return $true
+            }
+            return $false
+        }
     return $null -ne $installerProcesses
 }
 
