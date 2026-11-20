@@ -15,8 +15,10 @@ from cli.ahk_bridge import AHKBridge
 from cli.ui_inspector import (
     UIElement,
     WindowSnapshot,
+    list_visible_windows,
+    populate_snapshot_controls,
     save_unknown_window_dump,
-    scan_windows,
+    uia_invoke_direct,
     uia_trigger_element,
 )
 
@@ -37,9 +39,14 @@ class WatcherConfig:
         )
 
 
-def _matches_rule(snapshot: WindowSnapshot, rule: dict[str, Any]) -> bool:
+def _matches_win32_predicates(snapshot: WindowSnapshot, rule: dict[str, Any]) -> bool:
+    """Fast match using only Win32 window/child metadata (no UIA tree walk)."""
     proc_sub = rule.get("process_contains")
     if proc_sub and proc_sub.lower() not in snapshot.process_name.lower():
+        return False
+
+    class_name = rule.get("class_name")
+    if class_name and snapshot.class_name.lower() != class_name.lower():
         return False
 
     title_regex = rule.get("title_regex")
@@ -47,15 +54,53 @@ def _matches_rule(snapshot: WindowSnapshot, rule: dict[str, Any]) -> bool:
         if not re.search(title_regex, snapshot.title):
             return False
 
+    any_title_contains = rule.get("any_title_contains")
+    if any_title_contains:
+        titles_haystack = " ".join([snapshot.title, *snapshot.child_titles]).lower()
+        if not any(t.lower() in titles_haystack for t in any_title_contains):
+            return False
+
+    if "has_webview" in rule:
+        has_wv = snapshot.webview_hwnd is not None
+        if bool(rule["has_webview"]) != has_wv:
+            return False
+
+    return True
+
+
+def _matches_rule(snapshot: WindowSnapshot, rule: dict[str, Any]) -> bool:
+    if not _matches_win32_predicates(snapshot, rule):
+        return False
+
     text_contains = rule.get("text_contains")
     if text_contains:
         haystack = " ".join(
-            [snapshot.title, *snapshot.texts, *(e.name for e in snapshot.elements)]
+            [
+                snapshot.title,
+                *snapshot.child_titles,
+                *snapshot.texts,
+                *(e.name for e in snapshot.elements),
+            ]
         ).lower()
         if not any(t.lower() in haystack for t in text_contains):
             return False
 
     return True
+
+
+def _action_needs_ui_scan(action: dict[str, Any]) -> bool:
+    action_type = action.get("type", "click_control")
+    if action_type == "sequence":
+        return any(_action_needs_ui_scan(step) for step in action.get("steps", []))
+    return action_type not in {"uia_invoke", "close", "send_keys", "click_relative"}
+
+
+def _rule_needs_ui_scan(rule: dict[str, Any]) -> bool:
+    if rule.get("text_contains"):
+        return True
+    if "action" in rule:
+        return _action_needs_ui_scan(rule["action"])
+    return False
 
 
 def _find_target_element(
@@ -100,17 +145,59 @@ def _execute_action(
                 time.sleep(float(step.get("delay_after_sec", 0.25)))
         return any_executed
 
+    if action_type == "uia_invoke":
+        auto_id = action.get("automation_id")
+        control_names = action.get("control_names") or []
+        control_type = action.get("control_type", "ButtonControl")
+        use_webview = bool(action.get("use_webview", True))
+        target_hwnd = snap.webview_hwnd if (use_webview and snap.webview_hwnd) else snap.hwnd
+        default_depth = 8 if (use_webview and snap.webview_hwnd) else 10
+        search_depth = int(action.get("search_depth", default_depth))
+        timeout_sec = float(action.get("timeout_sec", 1.0))
+        desired_state = 0 if action.get("state") in (0, False, "0", "off", "false") else 1
+        target_desc = f"id={auto_id!r}" if auto_id else f"names={control_names!r}"
+
+        if ahk.dry_run:
+            print(
+                f"[RULE '{rule_name}'] [DRY-RUN] Would UIA-invoke {target_desc} "
+                f"in '{snap.display_title}' ({snap.process_name}, hwnd={target_hwnd})"
+            )
+            return True
+
+        if uia_invoke_direct(
+            hwnd=target_hwnd,
+            automation_id=auto_id,
+            control_names=control_names,
+            control_type=control_type,
+            desired_state=desired_state,
+            search_depth=search_depth,
+            timeout_sec=timeout_sec,
+        ):
+            print(
+                f"[RULE '{rule_name}'] UIA-invoked {target_desc} "
+                f"in '{snap.display_title}' ({snap.process_name}, hwnd={target_hwnd})"
+            )
+            return True
+        return False
+
     if action_type == "click_control":
         el = _find_target_element(snap, action)
         if not el:
             return False
         cx, cy = el.center
         desired_state = 0 if action.get("state") in (0, False, "0", "off", "false") else 1
+        target_hwnd = snap.webview_hwnd or snap.hwnd
+        search_depth = 8 if snap.webview_hwnd else 10
         print(
             f"[RULE '{rule_name}'] Clicking '{el.name}' "
-            f"at ({cx}, {cy}) in '{snap.title}' ({snap.process_name})"
+            f"at ({cx}, {cy}) in '{snap.display_title}' ({snap.process_name})"
         )
-        if not ahk.dry_run and uia_trigger_element(snap.hwnd, el, desired_state=desired_state):
+        if not ahk.dry_run and uia_trigger_element(
+            target_hwnd,
+            el,
+            desired_state=desired_state,
+            search_depth=search_depth,
+        ):
             return True
         ahk.click(cx, cy, hwnd=snap.hwnd)
         return True
@@ -123,7 +210,7 @@ def _execute_action(
         cy = int(top + (bottom - top) * rel_y)
         print(
             f"[RULE '{rule_name}'] Clicking relative ({rel_x:.2f}, {rel_y:.2f}) "
-            f"-> ({cx}, {cy}) in '{snap.title}' ({snap.process_name})"
+            f"-> ({cx}, {cy}) in '{snap.display_title}' ({snap.process_name})"
         )
         ahk.click(cx, cy, hwnd=snap.hwnd)
         return True
@@ -132,13 +219,13 @@ def _execute_action(
         keys = action.get("keys", "{Enter}")
         print(
             f"[RULE '{rule_name}'] Sending keys '{keys}' "
-            f"to '{snap.title}' ({snap.process_name})"
+            f"to '{snap.display_title}' ({snap.process_name})"
         )
         ahk.send_keys(keys, hwnd=snap.hwnd)
         return True
 
     if action_type == "close":
-        print(f"[RULE '{rule_name}'] Closing '{snap.title}'")
+        print(f"[RULE '{rule_name}'] Closing '{snap.display_title}'")
         ahk.close_window(snap.hwnd)
         return True
 
@@ -207,14 +294,21 @@ def wait_for_window(
     )
 
     while True:
-        snapshots = scan_windows(process_filters=proc_filters, title_regexes=title_rx_filter)
+        snapshots = list_visible_windows(process_filters=proc_filters, title_regexes=title_rx_filter)
         for snap in snapshots:
+            controls_loaded = False
             for rule in target_rules:
+                if not _matches_win32_predicates(snap, rule):
+                    continue
+                needs_scan = bool(click_control) or _rule_needs_ui_scan(rule)
+                if needs_scan and not controls_loaded:
+                    populate_snapshot_controls(snap)
+                    controls_loaded = True
                 if not _matches_rule(snap, rule):
                     continue
                 rule_name = rule.get("name", "unnamed")
                 print(
-                    f"[WAIT] Matched '{rule_name}' on '{snap.title}' "
+                    f"[WAIT] Matched '{rule_name}' on '{snap.display_title}' "
                     f"({snap.process_name}, HWND {snap.hwnd})"
                 )
                 if click_control:
@@ -313,19 +407,48 @@ def watch_loop(
                     print(f"[WATCH] Timeout reached ({timeout_sec}s). Exiting.")
                 break
 
-        snapshots = scan_windows(process_filters=config.target_processes)
+        snapshots = list_visible_windows(process_filters=config.target_processes)
         tick_matched_any_rule = False
         main_workspace_title: str | None = None
 
         for snap in snapshots:
-            is_ignored = any(_matches_rule(snap, ig) for ig in config.ignore_windows)
+            controls_loaded = False
+
+            def _ensure_controls() -> None:
+                nonlocal controls_loaded
+                if not controls_loaded:
+                    populate_snapshot_controls(snap)
+                    controls_loaded = True
+
+            skip_completely = False
+            is_ignored = False
+            for ig in config.ignore_windows:
+                if not _matches_win32_predicates(snap, ig):
+                    continue
+                if _rule_needs_ui_scan(ig):
+                    _ensure_controls()
+                if _matches_rule(snap, ig):
+                    is_ignored = True
+                    if ig.get("skip_scan"):
+                        skip_completely = True
+                        break
+
             if _is_main_workspace_window(snap, config.ignore_windows):
-                main_workspace_title = snap.title
+                main_workspace_title = snap.display_title
+
+            if skip_completely:
+                continue
 
             matched = False
+            matched_pending_direct = False
             for rule in active_rules:
                 if is_ignored and not rule.get("run_before_ignore", False):
                     continue
+                if not _matches_win32_predicates(snap, rule):
+                    continue
+                needs_scan = _rule_needs_ui_scan(rule)
+                if needs_scan:
+                    _ensure_controls()
                 if not _matches_rule(snap, rule):
                     continue
 
@@ -352,17 +475,23 @@ def watch_loop(
                         return
                     break
 
-            if is_ignored:
+                if not needs_scan:
+                    matched_pending_direct = True
+                    tick_matched_any_rule = True
+                    break
+
+            if is_ignored or matched or matched_pending_direct:
                 continue
 
-            if not matched and learn:
+            if learn:
+                _ensure_controls()
                 fp = snap.fingerprint()
-                if fp not in seen_unknown_fps and (snap.elements or snap.texts):
+                if fp not in seen_unknown_fps and (snap.elements or snap.texts or snap.child_titles):
                     seen_unknown_fps.add(fp)
                     json_p, png_p = save_unknown_window_dump(snap, dump_dir)
                     btns = [f"'{e.name}' ({e.control_type})" for e in snap.elements if e.name]
                     print(
-                        f"[UNKNOWN POPUP] '{snap.title}' ({snap.process_name}) | "
+                        f"[UNKNOWN POPUP] '{snap.display_title}' ({snap.process_name}) | "
                         f"Controls: {', '.join(btns[:8]) or 'none'}\n"
                         f"  -> Saved UI dump: {json_p}"
                         + (f"\n  -> Saved screenshot: {png_p}" if png_p else "")

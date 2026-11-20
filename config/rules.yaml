@@ -9,15 +9,16 @@ target_processes:
   - "Autodesk"
   - "MAXScript"
 
-# Windows that represent the main 3ds Max workspace (never treated as unknown popups)
+# Windows that represent the main 3ds Max workspace or splash screen (never treated as unknown popups)
 ignore_windows:
   - name: "Main 3ds Max Workspace"
     is_main_workspace: true
     title_regex: "^(Untitled|.*\\.max)\\s*-\\s*Autodesk 3ds Max (2024|2025|2026|2027|2028)"
-  - name: "Privacy Settings Inner WebView Host"
+  - name: "3ds Max Splash Screen"
+    is_main_workspace: false
+    skip_scan: true
     process_contains: "3dsmax"
-    title_regex: "^$"
-    text_contains: ["Privacy Settings"]
+    title_regex: "^3dsMax/(2024|2025|2026|2027|2028)"
 
 # Ordered list of popup handling rules (first match wins)
 rules:
@@ -33,12 +34,24 @@ rules:
 
   - name: "Privacy Settings (3ds Max 2026+ WebView)"
     process_contains: "3dsmax"
-    title_regex: "^3dsMax/(2026|2027|2028)"
-    text_contains: ["Privacy Settings"]
+    any_title_contains: ["Privacy Settings"]
+    has_webview: true
     action:
-      type: "click_relative"
-      rel_x: 0.88
-      rel_y: 0.94
+      type: "uia_invoke"
+      automation_id: "ok-button"
+      control_names: ["OK"]
+      control_type: "ButtonControl"
+      use_webview: true
+    cooldown_sec: 3
+
+  - name: "Startup Failure Detection (Continue Without Restore)"
+    process_contains: "3dsmax"
+    title_regex: "(?i)^Startup Failure Detection$"
+    action:
+      type: "uia_invoke"
+      control_names: ["Continue Without Restore", "Continue", "OK"]
+      control_type: "ButtonControl"
+      use_webview: false
     cooldown_sec: 3
 
   - name: "EULA / License Agreement"

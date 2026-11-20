@@ -44,7 +44,13 @@ def inspect(process: tuple[str, ...], all_windows: bool, json_out: Path | None) 
         return
 
     for snap in snapshots:
-        click.echo(f"\n=== [{snap.process_name} | PID {snap.pid} | HWND {snap.hwnd}] '{snap.title}' ===")
+        wv_info = f" | WebView HWND {snap.webview_hwnd}" if snap.webview_hwnd else ""
+        click.echo(
+            f"\n=== [{snap.process_name} | PID {snap.pid} | HWND {snap.hwnd}{wv_info}] "
+            f"'{snap.display_title}' (cls={snap.class_name!r}) ==="
+        )
+        if snap.child_titles:
+            click.echo(f"  Child titles: {' | '.join(snap.child_titles[:6])}")
         if snap.texts:
             click.echo(f"  Texts: {' | '.join(snap.texts[:6])}")
         for el in snap.elements:
