@@ -35,7 +35,7 @@ function Write-MegaLog {
         [string]$Level = 'INFO'
     )
     $ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
-    Write-Host "[$ts] [MEGA][$Level] $Message"
+    Write-Output "[$ts] [MEGA][$Level] $Message"
 }
 
 function Test-MegaUrl {
@@ -99,55 +99,28 @@ function Invoke-MegatoolsDownload {
 
     New-Item -ItemType Directory -Path $DownloadDir -Force | Out-Null
 
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = $ExePath
-    $psi.Arguments = "dl --path `"$DownloadDir`" `"$MegaUrl`""
-    $psi.UseShellExecute = $false
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-    $psi.CreateNoWindow = $true
-    $psi.StandardOutputEncoding = [System.Text.Encoding]::UTF8
-    $psi.StandardErrorEncoding = [System.Text.Encoding]::UTF8
-
-    $proc = New-Object System.Diagnostics.Process
-    $proc.StartInfo = $psi
-
-    $capturedErrors = New-Object System.Collections.Generic.List[string]
-    $lastProgressLine = ''
-
-    $outAction = {
-        param($sender, $e)
-        if ($null -ne $e.Data -and $e.Data.Trim() -ne '') {
-            Write-Host $e.Data
-        }
-    }
-    $errAction = {
-        param($sender, $e)
-        if ($null -ne $e.Data -and $e.Data.Trim() -ne '') {
-            Write-Host "[STDERR] $($e.Data)"
-            $Event.MessageData.Add($e.Data)
-        }
-    }
-
-    $outEvent = Register-ObjectEvent -InputObject $proc -EventName 'OutputDataReceived' -Action $outAction
-    $errEvent = Register-ObjectEvent -InputObject $proc -EventName 'ErrorDataReceived' -Action $errAction -MessageData $capturedErrors
-
+    $capturedLines = New-Object System.Collections.Generic.List[string]
+    $prevPref = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     try {
-        [void]$proc.Start()
-        $proc.BeginOutputReadLine()
-        $proc.BeginErrorReadLine()
-        $proc.WaitForExit()
+        & $ExePath dl --path $DownloadDir $MegaUrl 2>&1 | ForEach-Object {
+            $line = if ($_ -is [System.Management.Automation.ErrorRecord]) {
+                $_.Exception.Message
+            } else {
+                "$($_)"
+            }
+            if (-not [string]::IsNullOrWhiteSpace($line)) {
+                $capturedLines.Add($line)
+                Write-Output $line
+            }
+        }
+        $exitCode = $LASTEXITCODE
     } finally {
-        Unregister-Event -SourceIdentifier $outEvent.Name -ErrorAction SilentlyContinue
-        Unregister-Event -SourceIdentifier $errEvent.Name -ErrorAction SilentlyContinue
-        Remove-Job -Id $outEvent.Id -Force -ErrorAction SilentlyContinue
-        Remove-Job -Id $errEvent.Id -Force -ErrorAction SilentlyContinue
+        $ErrorActionPreference = $prevPref
     }
-
-    $exitCode = $proc.ExitCode
-    $errText = ($capturedErrors -join "`n")
 
     if ($exitCode -ne 0) {
+        $errText = ($capturedLines -join "`n")
         if ($errText -match '(?i)509|bandwidth|quota|overquota') {
             throw "Перевищено ліміт трафіку Mega.nz (Bandwidth/Quota limit). Спробуйте пізніше або через інший IP. Деталі: $errText"
         }
