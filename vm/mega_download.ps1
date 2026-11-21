@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 
 <#
 .SYNOPSIS
@@ -35,7 +35,7 @@ function Write-MegaLog {
         [string]$Level = 'INFO'
     )
     $ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
-    [Console]::WriteLine("[$ts] [MEGA][$Level] $Message")
+    Write-Host("[$ts] [MEGA][$Level] $Message")
 }
 
 function Test-MegaUrl {
@@ -111,7 +111,7 @@ function Invoke-MegatoolsDownload {
             }
             if (-not [string]::IsNullOrWhiteSpace($line)) {
                 $capturedLines.Add($line)
-                [Console]::WriteLine($line)
+                Write-Host($line)
             }
         }
         $exitCode = $LASTEXITCODE
