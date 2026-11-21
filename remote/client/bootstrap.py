@@ -236,8 +236,10 @@ def build_child_env(
 def build_child_command(
     python_exe: str,
     child_args: list[str] | None = None,
+    *,
+    module_name: str = "remote.client.main",
 ) -> list[str]:
-    """Build the command line for launching ``remote.client.main``.
+    """Build the command line for launching ``remote.client.main`` or ``remote.operator.main``.
 
     Uses ``runpy.run_module`` with ``MAX_APP_RELEASE_DIR`` inserted into
     ``sys.path`` because Windows ``python-embed`` ignores ``PYTHONPATH``
@@ -247,12 +249,98 @@ def build_child_command(
         "import os, runpy, sys; "
         "r = os.environ.get('MAX_APP_RELEASE_DIR'); "
         "r and r not in sys.path and sys.path.insert(0, r); "
-        "runpy.run_module('remote.client.main', run_name='__main__', alter_sys=True)"
+        f"runpy.run_module({module_name!r}, run_name='__main__', alter_sys=True)"
     )
     cmd = [python_exe, "-u", "-c", runner]
     if child_args:
         cmd.extend(child_args)
     return cmd
+
+
+def _detect_lan_ipv4() -> str | None:
+    """Best-effort local LAN IPv4 detection without external dependencies."""
+    import socket
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("8.8.8.8", 80))
+            ip = sock.getsockname()[0]
+            if ip and not ip.startswith(("127.", "169.254.")):
+                return ip
+    except OSError:
+        pass
+    return None
+
+
+def resolve_launch_role(
+    root_dir: Path,
+    *,
+    explicit_role: str | None = None,
+    child_args: list[str] | None = None,
+    interactive_tty: bool | None = None,
+) -> str:
+    """Determine whether to run as ``client`` or ``operator``.
+
+    Priority:
+    1. Explicit ``--role`` / ``--operator`` / ``--client``
+    2. Marker files in ``root_dir`` (``operator.mode`` -> operator, ``connect.json`` -> client)
+    3. Non-interactive / test flags (``--help``, ``--headless``, etc.) -> client
+    4. Interactive TTY prompt allowing the user to pick [1] Client or [2] Operator
+    """
+    if explicit_role in ("client", "operator"):
+        return explicit_role
+
+    if (root_dir / "operator.mode").is_file():
+        return "operator"
+    if (root_dir / "connect.json").is_file():
+        return "client"
+
+    args = child_args or []
+    if any(flag in args for flag in ("-h", "--help", "--headless", "--driver", "--connect-file")):
+        return "client"
+
+    is_tty = bool(sys.stdin and sys.stdin.isatty()) if interactive_tty is None else interactive_tty
+    if not is_tty:
+        return "client"
+
+    print("========================================", flush=True)
+    print("  MaxAgent Portable - Choose Mode:", flush=True)
+    print("========================================", flush=True)
+    print("  [1] Client   (install 3ds Max on this PC) [default]", flush=True)
+    print("  [2] Operator (control panel server in browser)", flush=True)
+    try:
+        choice = input("Select [1/2]: ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        return "client"
+    if choice in ("2", "o", "operator", "server", "s"):
+        return "operator"
+    return "client"
+
+
+def _build_operator_args(root_dir: Path, extra_args: list[str] | None) -> list[str]:
+    """Prepare default host/port/dirs for ``remote.operator.main`` if not already provided."""
+    args = list(extra_args or [])
+    if "--host" not in args:
+        args.extend(["--host", "0.0.0.0"])
+    if "--port" not in args:
+        args.extend(["--port", "8765"])
+    if "--iso-dir" not in args:
+        iso_dir = root_dir / "isos"
+        iso_dir.mkdir(parents=True, exist_ok=True)
+        args.extend(["--iso-dir", str(iso_dir)])
+    if "--assets-dir" not in args:
+        assets_dir = root_dir / "assets"
+        assets_dir.mkdir(parents=True, exist_ok=True)
+        args.extend(["--assets-dir", str(assets_dir)])
+    if "--updates-dir" not in args:
+        updates_dir = root_dir / "updates"
+        updates_dir.mkdir(parents=True, exist_ok=True)
+        args.extend(["--updates-dir", str(updates_dir)])
+    if "--public-url" not in args and "--mode" not in args:
+        lan_ip = _detect_lan_ipv4()
+        if lan_ip:
+            args.extend(["--public-url", f"http://{lan_ip}:8765"])
+    return args
 
 
 def run_supervisor(
@@ -263,15 +351,17 @@ def run_supervisor(
     python_exe: str | None = None,
     max_attempts: int = MAX_VERIFY_ATTEMPTS,
     raw_argv: list[str] | None = None,
+    role: str = "client",
 ) -> int:
-    """Supervise ``remote.client.main`` with exit-42 hot-swap and crash rollback."""
-    should_continue = ensure_elevated_interactive(
-        no_elevate=no_elevate,
-        interactive=True,
-        argv=raw_argv,
-    )
-    if not should_continue:
-        return 0
+    """Supervise ``remote.client.main`` or ``remote.operator.main`` with exit-42 hot-swap."""
+    if role == "client":
+        should_continue = ensure_elevated_interactive(
+            no_elevate=no_elevate,
+            interactive=True,
+            argv=raw_argv,
+        )
+        if not should_continue:
+            return 0
 
     app_dir = root_dir / "app"
     active_path = app_dir / "active.json"
@@ -316,7 +406,9 @@ def run_supervisor(
             active["attempts"] = attempts + 1
             atomic_write_json(active_path, active)
 
-        cmd = build_child_command(exe, child_args)
+        target_module = "remote.operator.main" if role == "operator" else "remote.client.main"
+        effective_args = _build_operator_args(root_dir, child_args) if role == "operator" else child_args
+        cmd = build_child_command(exe, effective_args, module_name=target_module)
         env = build_child_env(release_dir, root_dir)
         proc = subprocess.run(cmd, cwd=str(release_dir), env=env)
         rc = int(proc.returncode)
@@ -382,6 +474,27 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional Python executable path for launching child processes.",
     )
+    parser.add_argument(
+        "--role",
+        choices=("client", "operator"),
+        default=None,
+        help="Launch role: client (default) or operator (control panel).",
+    )
+    parser.add_argument(
+        "--operator",
+        "--server",
+        dest="role",
+        action="store_const",
+        const="operator",
+        help="Shortcut for --role operator.",
+    )
+    parser.add_argument(
+        "--client",
+        dest="role",
+        action="store_const",
+        const="client",
+        help="Shortcut for --role client.",
+    )
     return parser
 
 
@@ -391,13 +504,22 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_arg_parser()
     known, extra_args = parser.parse_known_args(raw_argv)
     root_dir = resolve_root_dir(known.root_dir)
+    role = resolve_launch_role(
+        root_dir,
+        explicit_role=known.role,
+        child_args=extra_args,
+    )
+    forwarded_raw = list(raw_argv)
+    if "--role" not in forwarded_raw and "--operator" not in forwarded_raw and "--client" not in forwarded_raw:
+        forwarded_raw.extend(["--role", role])
     try:
         return run_supervisor(
             root_dir,
             child_args=extra_args,
             no_elevate=bool(known.no_elevate),
             python_exe=known.python_exe,
-            raw_argv=raw_argv,
+            raw_argv=forwarded_raw,
+            role=role,
         )
     except RuntimeError as exc:
         sys.stderr.write(f"[bootstrap] ERROR: {exc}\n")

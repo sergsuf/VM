@@ -35,6 +35,13 @@ namespace MaxAgentSfx
                     File.Copy(externalConnect, targetConnect, overwrite: true);
                 }
 
+                string externalOpMode = Path.Combine(exeDir, "operator.mode");
+                string targetOpMode = Path.Combine(targetDir, "operator.mode");
+                if (File.Exists(externalOpMode))
+                {
+                    File.Copy(externalOpMode, targetOpMode, overwrite: true);
+                }
+
                 if (!File.Exists(startBat))
                 {
                     Console.Error.WriteLine("[MaxAgent-SFX] ERROR: Start-MaxAgent.bat not found after extraction.");
