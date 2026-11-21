@@ -2,9 +2,10 @@
 
 <#
 .SYNOPSIS
-    Portable Mega.nz downloader using megatools.exe (no browser required).
-    Supports public file/folder links, real-time output streaming, resume/skip,
-    error classification, and optional local .zip packaging.
+    Mega.nz downloader using official MEGAcmd (mega-get) without browser.
+    Automatically installs MEGAcmd silently if missing, starts MEGAcmdServer
+    detached (so stdout pipes never hang), streams progress in real time,
+    handles errors, and optionally packs result to .zip.
 #>
 
 [CmdletBinding()]
@@ -17,16 +18,14 @@ param(
 
     [switch]$AsZip,
     [string]$ZipName = 'mega_download.zip',
-    [switch]$Force,
-    [string]$MegatoolsDir = ''
+    [switch]$Force
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 
-$script:MegatoolsVersion = '1.11.5.20250706'
-$script:MegatoolsZipUrl = "https://xff.cz/megatools/builds/builds/megatools-$($script:MegatoolsVersion)-win64.zip"
+$script:MegaCmdInstallerUrl = 'https://mega.nz/MEGAcmdSetup64.exe'
 
 function Write-MegaLog {
     param(
@@ -45,54 +44,54 @@ function Test-MegaUrl {
             $Link -match '^https?://(www\.)?mega\.(nz|co\.nz)/#F?![A-Za-z0-9_-]+![A-Za-z0-9_-]+')
 }
 
-function Ensure-Megatools {
-    param([string]$ToolsBaseDir)
+function Ensure-MegaCmd {
+    $candidates = @(
+        (Join-Path $env:LOCALAPPDATA 'MEGAcmd'),
+        (Join-Path ${env:ProgramFiles} 'MEGAcmd'),
+        (Join-Path ${env:ProgramFiles(x86)} 'MEGAcmd')
+    ) | Where-Object { $_ -and (Test-Path -LiteralPath (Join-Path $_ 'mega-get.bat') -PathType Leaf) }
 
-    if (-not $ToolsBaseDir) {
-        $repoRoot = Split-Path -Parent $PSScriptRoot
-        $ToolsBaseDir = Join-Path $repoRoot "tools\megatools\$($script:MegatoolsVersion)"
+    $megaDir = $candidates | Select-Object -First 1
+    if (-not $megaDir) {
+        Write-MegaLog "MEGAcmd не знайдено. Завантаження та тихе встановлення MEGAcmdSetup64.exe..." 'INFO'
+        $instPath = Join-Path $env:TEMP 'MEGAcmdSetup64.exe'
+        try {
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+            Invoke-WebRequest -Uri $script:MegaCmdInstallerUrl -OutFile $instPath -UseBasicParsing -TimeoutSec 180
+        } catch {
+            throw "Не вдалося завантажити MEGAcmd з $($script:MegaCmdInstallerUrl): $($_.Exception.Message)"
+        }
+
+        $p = Start-Process -FilePath $instPath -ArgumentList '/S' -Wait -PassThru
+        Remove-Item -LiteralPath $instPath -Force -ErrorAction SilentlyContinue
+        if ($p.ExitCode -ne 0) {
+            throw "Встановлення MEGAcmd завершилось з кодом $($p.ExitCode)"
+        }
+
+        $megaDir = Join-Path $env:LOCALAPPDATA 'MEGAcmd'
+        if (-not (Test-Path -LiteralPath (Join-Path $megaDir 'mega-get.bat') -PathType Leaf)) {
+            throw "Не знайдено mega-get.bat після встановлення у $megaDir"
+        }
+        Write-MegaLog "MEGAcmd успішно встановлено: $megaDir" 'OK'
+    } else {
+        Write-MegaLog "Знайдено MEGAcmd: $megaDir" 'INFO'
     }
 
-    $exePath = Join-Path $ToolsBaseDir 'megatools.exe'
-    if (Test-Path -LiteralPath $exePath -PathType Leaf) {
-        Write-MegaLog "Знайдено портативний megatools: $exePath" 'INFO'
-        return $exePath
+    # Start MEGAcmdServer detached so it does not inherit caller stdout/stderr pipes
+    $serverExe = Join-Path $megaDir 'MEGAcmdServer.exe'
+    $running = Get-Process -Name 'MEGAcmdServer' -ErrorAction SilentlyContinue
+    if (-not $running -and (Test-Path -LiteralPath $serverExe -PathType Leaf)) {
+        Write-MegaLog "Запуск фонового MEGAcmdServer у detached-режимі..." 'INFO'
+        Start-Process -FilePath $serverExe -WindowStyle Hidden
+        Start-Sleep -Seconds 2
     }
 
-    Write-MegaLog "megatools.exe не знайдено. Завантаження портативної версії $($script:MegatoolsVersion)..." 'INFO'
-    New-Item -ItemType Directory -Path $ToolsBaseDir -Force | Out-Null
-
-    $zipTemp = Join-Path $ToolsBaseDir 'megatools-win64.zip'
-    $extractTemp = Join-Path $ToolsBaseDir '_extract'
-
-    try {
-        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-        Invoke-WebRequest -Uri $script:MegatoolsZipUrl -OutFile $zipTemp -UseBasicParsing -TimeoutSec 120
-    } catch {
-        throw "Не вдалося завантажити megatools з $($script:MegatoolsZipUrl): $($_.Exception.Message)"
-    }
-
-    if (Test-Path -LiteralPath $extractTemp) {
-        Remove-Item -LiteralPath $extractTemp -Recurse -Force
-    }
-    Expand-Archive -LiteralPath $zipTemp -DestinationPath $extractTemp -Force
-
-    $foundExe = Get-ChildItem -LiteralPath $extractTemp -Filter 'megatools.exe' -Recurse -File | Select-Object -First 1
-    if (-not $foundExe) {
-        throw "У завантаженому архіві megatools не знайдено megatools.exe."
-    }
-
-    Copy-Item -LiteralPath $foundExe.FullName -Destination $exePath -Force
-    Remove-Item -LiteralPath $zipTemp -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $extractTemp -Recurse -Force -ErrorAction SilentlyContinue
-
-    Write-MegaLog "megatools.exe успішно встановлено: $exePath" 'OK'
-    return $exePath
+    return (Join-Path $megaDir 'mega-get.bat')
 }
 
-function Invoke-MegatoolsDownload {
+function Invoke-MegaGetDownload {
     param(
-        [string]$ExePath,
+        [string]$MegaGetBat,
         [string]$MegaUrl,
         [string]$DownloadDir
     )
@@ -103,7 +102,7 @@ function Invoke-MegatoolsDownload {
     $prevPref = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        & $ExePath dl --print-names --path $DownloadDir $MegaUrl 2>&1 | ForEach-Object {
+        & $MegaGetBat $MegaUrl $DownloadDir 2>&1 | ForEach-Object {
             $line = if ($_ -is [System.Management.Automation.ErrorRecord]) {
                 $_.Exception.Message
             } else {
@@ -120,26 +119,21 @@ function Invoke-MegatoolsDownload {
     }
 
     if ($exitCode -ne 0) {
-        $errorLines = @($capturedLines | Where-Object { $_ -match '^ERROR:' })
-        $errText = ($errorLines -join "`n")
-        if (-not $errText) { $errText = ($capturedLines -join "`n") }
-
-        $allAlreadyExist = ($errorLines.Count -gt 0) -and (@($errorLines | Where-Object { $_ -notmatch '^ERROR:\s*File already exists' }).Count -eq 0)
-        if ($allAlreadyExist) {
-            Write-MegaLog "Усі файли вже присутні у цільовій папці (перекачування пропущено)." 'OK'
+        $errText = ($capturedLines -join "`n")
+        if ($errText -match '(?i)already exists') {
+            Write-MegaLog "Файли вже присутні у цільовій папці (перекачування пропущено)." 'OK'
             return
         }
-
-        if ($errText -match '(?i)509|bandwidth|quota|overquota') {
+        if ($errText -match '(?i)overquota|bandwidth|quota|509|transfer quota') {
             throw "Перевищено ліміт трафіку Mega.nz (Bandwidth/Quota limit). Спробуйте пізніше або через інший IP. Деталі: $errText"
         }
-        if ($errText -match '(?i)ENOENT|not found|invalid|parse|malformed|can''t find|failed to') {
+        if ($errText -match '(?i)invalid|not found|enoent|expired|removed|decryption') {
             throw "Невалідне або видалене посилання Mega.nz: $MegaUrl. Деталі: $errText"
         }
-        if ($errText -match '(?i)could not resolve|timed out|connection|network|ssl|tls') {
+        if ($errText -match '(?i)network|connection|timed out|resolve|offline') {
             throw "Помилка мережі при підключенні до Mega.nz. Деталі: $errText"
         }
-        throw "megatools завершився з кодом $exitCode. Деталі: $errText"
+        throw "mega-get завершився з кодом $exitCode. Деталі: $errText"
     }
 }
 
@@ -198,11 +192,11 @@ try {
         }
     }
 
-    $megatoolsExe = Ensure-Megatools -ToolsBaseDir $MegatoolsDir
+    $megaGetBat = Ensure-MegaCmd
     $downloadSubDir = if ($AsZip) { Join-Path $TargetDir '_files' } else { $TargetDir }
 
     Write-MegaLog "Запуск скачування з Mega.nz у '$downloadSubDir'..." 'INFO'
-    Invoke-MegatoolsDownload -ExePath $megatoolsExe -MegaUrl $Url -DownloadDir $downloadSubDir
+    Invoke-MegaGetDownload -MegaGetBat $megaGetBat -MegaUrl $Url -DownloadDir $downloadSubDir
 
     $downloadedFiles = @(Get-ChildItem -LiteralPath $downloadSubDir -Recurse -File)
     if ($downloadedFiles.Count -eq 0) {

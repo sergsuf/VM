@@ -17,7 +17,7 @@ if not exist "%PS_SCRIPT%" (
 echo ============================================================
 echo [MEGA-TEST] URL       : %MEGA_URL%
 echo [MEGA-TEST] TargetDir : %TARGET_DIR%
-echo [MEGA-TEST] Mode      : Portable megatools (direct folder structure)
+echo [MEGA-TEST] Mode      : MEGAcmd (mega-get, direct folder structure)
 echo ============================================================
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%PS_SCRIPT%" -Url "%MEGA_URL%" -TargetDir "%TARGET_DIR%"
