@@ -46,6 +46,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Run in console-only mode without opening a browser window (default)",
     )
     parser.add_argument(
+        "--status-ui",
         "--web-ui",
         "--open-ui",
         dest="web_ui",
