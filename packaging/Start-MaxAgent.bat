@@ -10,5 +10,5 @@ if not exist "%ROOT%runtime\bootstrap.py" (
     echo [MaxAgent] ERROR: Missing "%ROOT%runtime\bootstrap.py".
     exit /b 1
 )
-"%ROOT%runtime\python.exe" -u "%ROOT%runtime\bootstrap.py" --root "%ROOT%" %*
+"%ROOT%runtime\python.exe" -u "%ROOT%runtime\bootstrap.py" --root "%ROOT%." %*
 exit /b %ERRORLEVEL%

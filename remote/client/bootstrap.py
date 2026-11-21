@@ -237,8 +237,19 @@ def build_child_command(
     python_exe: str,
     child_args: list[str] | None = None,
 ) -> list[str]:
-    """Build the command line for launching ``remote.client.main``."""
-    cmd = [python_exe, "-u", "-m", "remote.client.main"]
+    """Build the command line for launching ``remote.client.main``.
+
+    Uses ``runpy.run_module`` with ``MAX_APP_RELEASE_DIR`` inserted into
+    ``sys.path`` because Windows ``python-embed`` ignores ``PYTHONPATH``
+    whenever a ``python*._pth`` file is present.
+    """
+    runner = (
+        "import os, runpy, sys; "
+        "r = os.environ.get('MAX_APP_RELEASE_DIR'); "
+        "r and r not in sys.path and sys.path.insert(0, r); "
+        "runpy.run_module('remote.client.main', run_name='__main__', alter_sys=True)"
+    )
+    cmd = [python_exe, "-u", "-c", runner]
     if child_args:
         cmd.extend(child_args)
     return cmd
