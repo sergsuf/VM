@@ -4,8 +4,8 @@
 .SYNOPSIS
     Mega.nz downloader using official MEGAcmd (mega-get) without browser.
     Automatically installs MEGAcmd silently if missing, starts MEGAcmdServer
-    detached (so stdout pipes never hang), streams progress in real time,
-    handles errors, and optionally packs result to .zip.
+    detached (so stdout pipes never hang), streams balanced monotonic % progress
+    to console and status file(s), handles errors, and optionally packs to .zip.
 #>
 
 [CmdletBinding()]
@@ -16,6 +16,9 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$TargetDir,
 
+    [string]$StatusPath = '',
+    [double]$EstimatedTotalMB = 1500,
+    [int]$EstimatedFiles = 190,
     [switch]$AsZip,
     [string]$ZipName = 'mega_download.zip',
     [switch]$Force
@@ -26,6 +29,9 @@ $ErrorActionPreference = 'Stop'
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 
 $script:MegaCmdInstallerUrl = 'https://mega.nz/MEGAcmdSetup64.exe'
+$script:MaxPercent = 0
+$script:LastReportedPercent = -1
+$script:StatusTargets = New-Object System.Collections.Generic.List[string]
 
 function Write-MegaLog {
     param(
@@ -35,6 +41,73 @@ function Write-MegaLog {
     )
     $ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
     Write-Host("[$ts] [MEGA][$Level] $Message")
+}
+
+function Initialize-StatusTargets {
+    param([string]$ExplicitPath, [string]$DownloadRoot)
+
+    $script:StatusTargets.Clear()
+    if ($ExplicitPath) {
+        $script:StatusTargets.Add($ExplicitPath)
+    } else {
+        $script:StatusTargets.Add((Join-Path $DownloadRoot 'mega_status.txt'))
+        if (Test-Path -LiteralPath 'Z:\' -PathType Container -ErrorAction SilentlyContinue) {
+            $script:StatusTargets.Add('Z:\3dsMax\Install\logs\mega-download-status.txt')
+        }
+    }
+}
+
+function Write-MegaStatus {
+    param(
+        [ValidateRange(0, 100)][int]$Percent,
+        [string]$Message,
+        [switch]$ForceOutput
+    )
+
+    if ($Percent -lt $script:MaxPercent) {
+        $Percent = $script:MaxPercent
+    } else {
+        $script:MaxPercent = $Percent
+    }
+
+    $payload = "$Percent%|$Message"
+    foreach ($path in $script:StatusTargets) {
+        try {
+            $dir = Split-Path -Parent $path
+            if ($dir -and -not (Test-Path -LiteralPath $dir -PathType Container)) {
+                New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            }
+            Set-Content -LiteralPath $path -Value $payload -Encoding UTF8
+        } catch {
+            # Ignore transient file lock if host PC is reading status file concurrently
+        }
+    }
+
+    if ($ForceOutput -or ($Percent -ne $script:LastReportedPercent)) {
+        $script:LastReportedPercent = $Percent
+        $barWidth = 30
+        $filled = [int][Math]::Floor($barWidth * $Percent / 100)
+        $bar = ('#' * $filled) + ('-' * ($barWidth - $filled))
+        Write-Host ("[{0}] {1,3}% | {2}" -f $bar, $Percent, $Message)
+    }
+}
+
+function Get-FallbackEstimatedPercent {
+    param([string]$ScanDir)
+
+    if (-not (Test-Path -LiteralPath $ScanDir -PathType Container)) { return 1 }
+    $files = @(Get-ChildItem -LiteralPath $ScanDir -Recurse -File -ErrorAction SilentlyContinue)
+    if ($files.Count -eq 0) { return 1 }
+
+    $bytes = ($files | Measure-Object -Property Length -Sum).Sum
+    $mb = $bytes / 1MB
+
+    $byteRatio = if ($EstimatedTotalMB -gt 0) { [Math]::Min(1.0, $mb / $EstimatedTotalMB) } else { 0.0 }
+    $fileRatio = if ($EstimatedFiles -gt 0) { [Math]::Min(1.0, $files.Count / $EstimatedFiles) } else { 0.0 }
+
+    # Byte-weighted hybrid (85% bytes, 15% file count) to stay smooth across mixed file sizes
+    $pct = [int][Math]::Floor((0.85 * $byteRatio + 0.15 * $fileRatio) * 99)
+    return [Math]::Max(1, [Math]::Min(99, $pct))
 }
 
 function Test-MegaUrl {
@@ -53,6 +126,7 @@ function Ensure-MegaCmd {
 
     $megaDir = $candidates | Select-Object -First 1
     if (-not $megaDir) {
+        Write-MegaStatus -Percent 2 -Message 'Downloading MEGAcmd...' -ForceOutput
         Write-MegaLog "MEGAcmd не знайдено. Завантаження та тихе встановлення MEGAcmdSetup64.exe..." 'INFO'
         $instPath = Join-Path $env:TEMP 'MEGAcmdSetup64.exe'
         try {
@@ -62,6 +136,7 @@ function Ensure-MegaCmd {
             throw "Не вдалося завантажити MEGAcmd з $($script:MegaCmdInstallerUrl): $($_.Exception.Message)"
         }
 
+        Write-MegaStatus -Percent 5 -Message 'Installing MEGAcmd...' -ForceOutput
         $p = Start-Process -FilePath $instPath -ArgumentList '/S' -Wait -PassThru
         Remove-Item -LiteralPath $instPath -Force -ErrorAction SilentlyContinue
         if ($p.ExitCode -ne 0) {
@@ -97,6 +172,7 @@ function Invoke-MegaGetDownload {
     )
 
     New-Item -ItemType Directory -Path $DownloadDir -Force | Out-Null
+    Write-MegaStatus -Percent 1 -Message 'Starting Mega download...' -ForceOutput
 
     $capturedLines = New-Object System.Collections.Generic.List[string]
     $prevPref = $ErrorActionPreference
@@ -108,9 +184,27 @@ function Invoke-MegaGetDownload {
             } else {
                 "$($_)"
             }
-            if (-not [string]::IsNullOrWhiteSpace($line)) {
-                $capturedLines.Add($line)
+            if ([string]::IsNullOrWhiteSpace($line)) { return }
+            $capturedLines.Add($line)
+
+            if ($line -match 'TRANSFERRING.*?\(\s*([\d.]+)\s*/\s*([\d.]+)\s*([KMG]?B)\s*:\s*([\d.]+)\s*%') {
+                $doneVal = $Matches[1]
+                $totVal = $Matches[2]
+                $unit = $Matches[3]
+                $rawPct = [double]$Matches[4]
+                $pct = [int][Math]::Floor($rawPct)
+                if ($pct -ge 100 -and ($line -notmatch 'Download finished')) {
+                    $pct = 99
+                }
+                Write-MegaStatus -Percent $pct -Message "$doneVal/$totVal $unit"
+            } elseif ($line -match 'Download finished') {
+                Write-MegaStatus -Percent 99 -Message 'Finalizing files...' -ForceOutput
+            } else {
                 Write-Host($line)
+                $estPct = Get-FallbackEstimatedPercent -ScanDir $DownloadDir
+                if ($estPct -gt $script:MaxPercent) {
+                    Write-MegaStatus -Percent $estPct -Message 'Downloading...'
+                }
             }
         }
         $exitCode = $LASTEXITCODE
@@ -119,7 +213,9 @@ function Invoke-MegaGetDownload {
     }
 
     if ($exitCode -ne 0) {
-        $errText = ($capturedLines -join "`n")
+        $errorLines = @($capturedLines | Where-Object { $_ -match '^ERROR' })
+        $errText = if ($errorLines.Count -gt 0) { $errorLines -join "`n" } else { $capturedLines -join "`n" }
+
         if ($errText -match '(?i)already exists') {
             Write-MegaLog "Файли вже присутні у цільовій папці (перекачування пропущено)." 'OK'
             return
@@ -172,21 +268,24 @@ function Pack-FolderToZip {
 
 # --- Main ---
 try {
-    Write-MegaLog "URL       : $Url" 'INFO'
-    Write-MegaLog "TargetDir : $TargetDir" 'INFO'
-    Write-MegaLog "AsZip     : $($AsZip.IsPresent)" 'INFO'
+    New-Item -ItemType Directory -Path $TargetDir -Force | Out-Null
+    Initialize-StatusTargets -ExplicitPath $StatusPath -DownloadRoot $TargetDir
+
+    Write-MegaLog "URL        : $Url" 'INFO'
+    Write-MegaLog "TargetDir  : $TargetDir" 'INFO'
+    Write-MegaLog "StatusFile : $($script:StatusTargets -join '; ')" 'INFO'
+    Write-MegaLog "AsZip      : $($AsZip.IsPresent)" 'INFO'
 
     if (-not (Test-MegaUrl -Link $Url)) {
         throw "Невалідний формат посилання Mega.nz: '$Url'"
     }
-
-    New-Item -ItemType Directory -Path $TargetDir -Force | Out-Null
 
     $zipOutputPath = Join-Path $TargetDir $ZipName
     if ($AsZip -and (-not $Force) -and (Test-Path -LiteralPath $zipOutputPath -PathType Leaf)) {
         $existingZip = Get-Item -LiteralPath $zipOutputPath
         if ($existingZip.Length -gt 0) {
             $sizeMB = [Math]::Round($existingZip.Length / 1MB, 2)
+            Write-MegaStatus -Percent 100 -Message "Ready (cached $sizeMB MB)" -ForceOutput
             Write-MegaLog "ZIP-архів вже існує ($sizeMB MB): $zipOutputPath. Пропуск завантаження (використайте -Force для перезавантаження)." 'OK'
             exit 0
         }
@@ -208,14 +307,17 @@ try {
     Write-MegaLog "Скачано файлів: $($downloadedFiles.Count), загальний розмір: $totalMB MB" 'OK'
 
     if ($AsZip) {
+        Write-MegaStatus -Percent 99 -Message 'Packing ZIP...' -ForceOutput
         Pack-FolderToZip -SourceDir $downloadSubDir -OutputZipPath $zipOutputPath
         $zipInfo = Get-Item -LiteralPath $zipOutputPath
         $zipMB = [Math]::Round($zipInfo.Length / 1MB, 2)
         Write-MegaLog "Готово! ZIP-архів створено: $zipOutputPath ($zipMB MB)" 'OK'
     }
 
+    Write-MegaStatus -Percent 100 -Message "Done ($($downloadedFiles.Count) files, $totalMB MB)" -ForceOutput
     exit 0
 } catch {
+    Write-MegaStatus -Percent $script:MaxPercent -Message "ERROR: $($_.Exception.Message)" -ForceOutput
     Write-MegaLog $_.Exception.Message 'ERROR'
     exit 1
 }
