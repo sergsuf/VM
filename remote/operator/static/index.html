@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>3ds Max Remote Deployment — Operator Control Panel</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <h1>3ds Max Remote Deployment</h1>
+      <span class="badge" id="mode-badge">direct</span>
+      <span class="badge status-pill" id="sse-badge">SSE: Connecting</span>
+    </div>
+    <div class="pairing-bar">
+      <span class="muted">Session: <strong id="pair-sid">-</strong></span>
+      <button class="btn secondary" id="btn-copy-uri" type="button">Copy maxpair://</button>
+      <a class="btn primary" href="/api/v1/ui/pairing/connect.json" download="connect.json">Download connect.json</a>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <section class="card">
+        <div class="card-header">
+          <h2>Clients</h2>
+          <button class="btn small secondary" id="btn-rescan" type="button">Rescan ISOs</button>
+        </div>
+        <div id="clients-list" class="clients-list">
+          <div class="empty-note">Waiting for client connection...</div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>System &amp; Security</h2>
+        <div class="kv-list" id="sys-kv">
+          <div class="kv"><span>Hostname</span><strong id="sys-host">-</strong></div>
+          <div class="kv"><span>OS</span><span id="sys-os">-</span></div>
+          <div class="kv"><span>Admin / UAC</span><strong id="sys-admin">-</strong></div>
+          <div class="kv"><span>Session ID</span><span id="sys-sid">-</span></div>
+          <div class="kv"><span>Smart App Control</span><strong id="sys-sac">-</strong></div>
+          <div class="kv"><span>Windows Defender RTP</span><strong id="sys-def">-</strong></div>
+          <div class="kv"><span>Tamper Protection</span><span id="sys-tamper">-</span></div>
+          <div class="kv"><span>Free Disk</span><span id="sys-disk">-</span></div>
+          <div class="kv"><span>Installed Max</span><span id="sys-max">-</span></div>
+          <div class="kv"><span>Agent / Runtime</span><span id="sys-ver">-</span></div>
+        </div>
+        <div class="btn-grid">
+          <button class="btn" data-cmd="request_elevation" type="button">Request UAC Admin</button>
+          <button class="btn warn" data-cmd="smart_app_control" data-payload='{"mode":"guided"}' type="button">Disable Smart App Control</button>
+          <button class="btn warn" data-cmd="defender_control" data-payload='{"action":"disable"}' type="button">Disable Defender RTP</button>
+          <button class="btn secondary" data-cmd="defender_control" data-payload='{"action":"add_exclusions"}' type="button">Add Defender Exclusions</button>
+          <button class="btn secondary" data-cmd="defender_control" data-payload='{"action":"open_settings"}' type="button">Defender Settings</button>
+          <button class="btn secondary" data-cmd="refresh_status" type="button">Refresh Status</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Pairing Info</h2>
+        <div class="mono-box" id="pairing-uri-box">-</div>
+      </section>
+    </aside>
+
+    <main class="workspace">
+      <section class="card">
+        <div class="card-header">
+          <h2>7-Stage Deployment Pipeline</h2>
+          <span class="badge" id="stage-status-badge">PREP / idle</span>
+        </div>
+        <div class="stepper" id="stage-stepper"></div>
+      </section>
+
+      <section class="banner hidden" id="wait-license-banner">
+        <div>
+          <strong>WAIT_LICENSE — Manual Licensing Required</strong>
+          <p>Complete Autodesk 3ds Max licensing on the client machine (via TeamViewer), then confirm to launch First Run automation.</p>
+        </div>
+        <button class="btn warn" data-cmd="confirm_license" type="button">Confirm License &amp; Start First Run</button>
+      </section>
+
+      <div class="two-col">
+        <section class="card">
+          <h2>ISO Selection &amp; Install</h2>
+          <div class="form-row">
+            <label for="iso-select">3ds Max ISO</label>
+            <select id="iso-select"></select>
+          </div>
+          <div class="form-row">
+            <label for="version-input">Target Version</label>
+            <input id="version-input" type="text" value="2025">
+          </div>
+          <button class="btn primary" id="btn-start-install" type="button">Start Install</button>
+
+          <div class="telemetry">
+            <div class="kv"><span>Transfer</span><span id="transfer-label">-</span></div>
+            <progress id="transfer-progress" max="100" value="0"></progress>
+            <div class="kv"><span>Installer</span><span id="install-label">0%</span></div>
+            <progress id="install-progress" max="100" value="0"></progress>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-header">
+            <h2>1-Click Post-Config</h2>
+            <button class="btn primary" data-cmd="trigger_post_config" type="button">Run 1-Click Post-Config</button>
+          </div>
+          <div class="steps-list" id="post-config-list"></div>
+        </section>
+      </div>
+
+      <section class="card hidden" id="done-summary-card">
+        <h2>DONE — Verification Summary</h2>
+        <pre class="summary-pre" id="done-summary-pre"></pre>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <h2>Lifecycle &amp; Agent Auto-Update</h2>
+          <span class="muted" id="update-manifest-label">No update bundle</span>
+        </div>
+        <div class="btn-row">
+          <button class="btn secondary" data-cmd="pause" type="button">Pause</button>
+          <button class="btn secondary" data-cmd="resume" type="button">Resume</button>
+          <button class="btn secondary" data-cmd="retry" type="button">Retry</button>
+          <button class="btn danger" data-cmd="abort" type="button">Abort</button>
+          <button class="btn secondary" data-cmd="reset" data-payload='{"target_stage":"PREP"}' type="button">Reset</button>
+          <button class="btn secondary" data-cmd="trigger_first_run" type="button">Trigger First Run</button>
+          <button class="btn secondary" data-cmd="capture_screenshot" type="button">Screenshot</button>
+          <button class="btn primary" data-cmd="push_update" type="button">Push App Update</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <h2>Live Client Logs</h2>
+          <select id="log-level-filter">
+            <option value="ALL">All Levels</option>
+            <option value="INFO">INFO+</option>
+            <option value="WARN">WARN+</option>
+            <option value="ERROR">ERROR</option>
+          </select>
+        </div>
+        <div class="logs-box" id="logs-box"></div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

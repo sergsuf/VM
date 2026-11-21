@@ -4,20 +4,38 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "max-vm-auto"
-version = "0.1.0"
-description = "CLI & AutoHotkey v2 automation toolkit for testing 3ds Max 2025 installation and setup on Hyper-V VM"
+version = "0.2.0"
+description = "CLI, AutoHotkey v2, and pure-Python remote deployment toolkit for 3ds Max 2024-2028"
 requires-python = ">=3.10"
 dependencies = [
-    "uiautomation>=2.0.18",
+    "uiautomation>=2.0.18; sys_platform == 'win32'",
     "PyYAML>=6.0.1",
     "click>=8.1.7",
     "Pillow>=10.2.0",
     "psutil>=5.9.8",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.4",
+]
+
 [project.scripts]
 max-auto = "cli.main:cli"
+max-operator = "remote.operator.main:main"
+max-client = "remote.client.main:main"
+max-relay = "remote.relay_server:main"
 
 [tool.setuptools]
-packages = ["cli"]
+include-package-data = true
 
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["cli*", "remote*", "packaging*"]
+
+[tool.setuptools.package-data]
+"remote.operator" = ["static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

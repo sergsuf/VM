@@ -114,6 +114,7 @@ rules:
     cooldown_sec: 2
 
   - name: "3ds Max License Startup Error (OK)"
+    client_action: "licensing_required"
     process_contains: "3dsmax"
     title_regex: "(?i)^License Startup Error$"
     text_contains: ["problem with the software license"]
@@ -131,6 +132,7 @@ rules:
     cooldown_sec: 2
 
   - name: "Autodesk Licensing - Specify a license server (Close)"
+    client_action: "licensing_required"
     process_contains: "AdskLicensingAgent"
     title_regex: "(?i)WebView2 WebBrowser"
     text_contains: ["Specify a license server", "Server Name"]
@@ -139,6 +141,7 @@ rules:
     cooldown_sec: 5
 
   - name: "Autodesk Licensing - Let's Get Started (UIA Select)"
+    client_action: "licensing_required"
     process_contains: "AdskLicensingAgent"
     title_regex: "(?i)WebView2 WebBrowser"
     text_contains: ["Untitled", "Clic LGS"]
@@ -149,6 +152,7 @@ rules:
     cooldown_sec: 5
 
   - name: "Autodesk Licensing - Let's Get Started (Relative Fallback)"
+    client_action: "licensing_required"
     process_contains: "AdskLicensingAgent"
     title_regex: "(?i)WebView2 WebBrowser"
     text_contains: ["Untitled", "Clic LGS"]
@@ -159,6 +163,7 @@ rules:
     cooldown_sec: 5
 
   - name: "Autodesk Sign-In / Identity Prompt (Dismiss if offline/testing)"
+    client_action: "licensing_required"
     process_contains: "AdskIdentityManager"
     title_regex: ".*"
     action:

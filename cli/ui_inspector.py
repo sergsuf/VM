@@ -14,7 +14,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import psutil
+try:
+    import psutil  # type: ignore[import-not-found]
+except ImportError:
+    psutil = None  # type: ignore[assignment]
 
 
 def _ensure_default_desktop() -> None:
@@ -141,6 +144,14 @@ def _ensure_windows() -> None:
 
 
 def _get_process_name(pid: int) -> str:
+    if psutil is None:
+        comm = Path(f"/proc/{pid}/comm")
+        if comm.is_file():
+            try:
+                return comm.read_text(encoding="utf-8", errors="ignore").strip() or "unknown"
+            except OSError:
+                pass
+        return "unknown"
     try:
         return psutil.Process(pid).name()
     except (psutil.NoSuchProcess, psutil.AccessDenied):

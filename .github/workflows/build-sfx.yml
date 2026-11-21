@@ -1,0 +1,40 @@
+name: Build MaxAgent Portable EXE
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner_label:
+        description: "Runner to use: self-hosted (VM) or windows-latest"
+        required: true
+        default: "self-hosted"
+        type: choice
+        options:
+          - self-hosted
+          - windows-latest
+      version:
+        description: "App version for the portable bundle"
+        required: true
+        default: "1.0.0"
+        type: string
+
+jobs:
+  build-sfx:
+    runs-on: ${{ inputs.runner_label }}
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build MaxAgent-Portable.exe
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          & ".\packaging\build_sfx_exe.ps1" -OutExe "dist\MaxAgent-Portable.exe" -Version "${{ inputs.version }}"
+
+      - name: Upload MaxAgent-Portable.exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: MaxAgent-Portable-${{ inputs.version }}
+          path: dist/MaxAgent-Portable.exe
+          if-no-files-found: error
+          retention-days: 14

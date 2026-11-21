@@ -3,13 +3,20 @@
 from __future__ import annotations
 
 import re
+import subprocess
+import sys
+import threading
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-import psutil
 import yaml
+
+try:
+    import psutil  # type: ignore[import-not-found]
+except ImportError:
+    psutil = None  # type: ignore[assignment]
 
 from cli.ahk_bridge import AHKBridge
 from cli.ui_inspector import (
@@ -21,6 +28,20 @@ from cli.ui_inspector import (
     uia_invoke_direct,
     uia_trigger_element,
 )
+
+
+@dataclass
+class WatchResult:
+    status: str  # "ready" | "licensing_required" | "timeout" | "failed" | "aborted"
+    detail: str
+    matched_rules: list[str] = field(default_factory=list)
+    screenshots: list[str] = field(default_factory=list)
+    main_workspace_title: str | None = None
+    elapsed_sec: float = 0.0
+    exit_code: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 @dataclass
@@ -344,13 +365,42 @@ def is_process_running(process_substrings: tuple[str, ...] | list[str]) -> bool:
     needles = [s.lower() for s in process_substrings if s]
     if not needles:
         return False
-    for proc in psutil.process_iter(["name"]):
+    if psutil is not None:
+        for proc in psutil.process_iter(["name"]):
+            try:
+                name = (proc.info.get("name") or "").lower()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+            if name and any(n in name for n in needles):
+                return True
+        return False
+    if sys.platform == "win32":
         try:
-            name = (proc.info.get("name") or "").lower()
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            continue
-        if name and any(n in name for n in needles):
-            return True
+            res = subprocess.run(
+                ["tasklist", "/FO", "CSV", "/NH"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            for line in res.stdout.splitlines():
+                proc_name = line.split(",", 1)[0].strip().strip('"').lower()
+                if proc_name and any(n in proc_name for n in needles):
+                    return True
+        except Exception:
+            pass
+        return False
+    proc_root = Path("/proc")
+    if proc_root.is_dir():
+        for entry in proc_root.iterdir():
+            if not entry.name.isdigit():
+                continue
+            try:
+                name = (entry / "comm").read_text(encoding="utf-8", errors="ignore").strip().lower()
+                if name and any(n in name for n in needles):
+                    return True
+            except OSError:
+                continue
     return False
 
 
@@ -362,6 +412,20 @@ def _is_main_workspace_window(
     explicit_main = [ig for ig in ignore_windows if ig.get("is_main_workspace")]
     candidates = explicit_main if explicit_main else ignore_windows
     return any(_matches_rule(snapshot, ig) for ig in candidates)
+
+
+def _is_client_licensing_rule(rule: dict[str, Any], snap: WindowSnapshot) -> bool:
+    """Return True if matched rule/window represents an interactive licensing or sign-in gate."""
+    if str(rule.get("client_action", "")).lower() == "licensing_required":
+        return True
+    if rule.get("is_licensing") is True:
+        return True
+    proc_lower = snap.process_name.lower()
+    if "adsklicensingagent" in proc_lower or "adskidentitymanager" in proc_lower:
+        return True
+    if "license startup error" in snap.display_title.lower():
+        return True
+    return False
 
 
 def watch_loop(
@@ -376,28 +440,62 @@ def watch_loop(
     only_rules: list[str] | None = None,
     stop_after_all: bool = False,
     wait_while_running: tuple[str, ...] = ("3dsmax",),
-) -> None:
+    profile: str = "vm-test",
+    max_timeout_sec: float | None = None,
+    cancel_event: threading.Event | None = None,
+    fail_if_process_exits: bool = False,
+) -> WatchResult:
     """Continuously scan windows, execute matching rules, and dump unknown popups."""
+    normalized_profile = (profile or "vm-test").strip().lower()
+    if normalized_profile not in ("vm-test", "client"):
+        raise ValueError(f"Unsupported watcher profile: {profile!r}. Expected 'vm-test' or 'client'.")
+
     active_rules = (
         resolve_rules_by_name(config.rules, only_rules)
         if only_rules
         else config.rules
     )
     completed_rules: set[str] = set()
+    matched_rules_ordered: list[str] = []
+    screenshots: list[str] = []
     start_time = time.monotonic()
     last_rule_hit: dict[str, float] = {}
     seen_unknown_fps: set[str] = set()
     main_ready_since: float | None = None
     extended_for_process = False
+    process_seen = is_process_running(wait_while_running) if fail_if_process_exits else False
 
     print(
-        f"[WATCH] Started (processes={config.target_processes}, "
-        f"rules={len(active_rules)}, timeout={timeout_sec}s, "
+        f"[WATCH] Started (profile={normalized_profile}, processes={config.target_processes}, "
+        f"rules={len(active_rules)}, timeout={timeout_sec}s, max_timeout={max_timeout_sec}, "
         f"learn={learn}, dry_run={ahk.dry_run})"
     )
 
     while True:
+        if cancel_event is not None and cancel_event.is_set():
+            elapsed = round(time.monotonic() - start_time, 3)
+            print("[WATCH] Cancelled via cancel_event. Exiting.")
+            return WatchResult(
+                status="aborted",
+                detail="Watcher cancelled.",
+                matched_rules=matched_rules_ordered,
+                screenshots=screenshots,
+                elapsed_sec=elapsed,
+                exit_code=1,
+            )
+
         elapsed = time.monotonic() - start_time
+        if max_timeout_sec is not None and max_timeout_sec > 0 and elapsed >= max_timeout_sec:
+            print(f"[WATCH] Hard max-timeout reached ({max_timeout_sec}s). Exiting.")
+            return WatchResult(
+                status="timeout",
+                detail=f"Hard max-timeout ({max_timeout_sec}s) reached.",
+                matched_rules=matched_rules_ordered,
+                screenshots=screenshots,
+                elapsed_sec=round(elapsed, 3),
+                exit_code=1,
+            )
+
         if timeout_sec > 0 and elapsed >= timeout_sec:
             if stop_on_main_ready and is_process_running(wait_while_running):
                 if not extended_for_process:
@@ -408,10 +506,35 @@ def watch_loop(
                     )
             else:
                 if extended_for_process:
-                    print(f"[WATCH] Process {wait_while_running} exited after timeout. Exiting.")
+                    detail = f"Process {wait_while_running} exited after timeout."
+                    print(f"[WATCH] {detail} Exiting.")
                 else:
-                    print(f"[WATCH] Timeout reached ({timeout_sec}s). Exiting.")
-                break
+                    detail = f"Timeout reached ({timeout_sec}s)."
+                    print(f"[WATCH] {detail} Exiting.")
+                return WatchResult(
+                    status="timeout",
+                    detail=detail,
+                    matched_rules=matched_rules_ordered,
+                    screenshots=screenshots,
+                    elapsed_sec=round(elapsed, 3),
+                    exit_code=1,
+                )
+
+        if fail_if_process_exits:
+            running_now = is_process_running(wait_while_running)
+            if running_now:
+                process_seen = True
+            elif process_seen or elapsed >= 5.0:
+                detail = f"Target process {wait_while_running} exited before main workspace became ready."
+                print(f"[WATCH] {detail}")
+                return WatchResult(
+                    status="failed",
+                    detail=detail,
+                    matched_rules=matched_rules_ordered,
+                    screenshots=screenshots,
+                    elapsed_sec=round(elapsed, 3),
+                    exit_code=1,
+                )
 
         snapshots = list_visible_windows(process_filters=config.target_processes)
         tick_matched_any_rule = False
@@ -459,6 +582,27 @@ def watch_loop(
                     continue
 
                 rule_name = rule.get("name", "unnamed")
+                if normalized_profile == "client" and _is_client_licensing_rule(rule, snap):
+                    _ensure_controls()
+                    json_p, png_p = save_unknown_window_dump(snap, dump_dir)
+                    if png_p is not None:
+                        screenshots.append(str(png_p))
+                    if rule_name not in matched_rules_ordered:
+                        matched_rules_ordered.append(rule_name)
+                    detail = (
+                        f"Licensing/sign-in dialog detected ({rule_name}: "
+                        f"{snap.display_title or snap.process_name})."
+                    )
+                    print(f"[WATCH] [CLIENT] {detail} Dump: {json_p}")
+                    return WatchResult(
+                        status="licensing_required",
+                        detail=detail,
+                        matched_rules=matched_rules_ordered,
+                        screenshots=screenshots,
+                        elapsed_sec=round(time.monotonic() - start_time, 3),
+                        exit_code=10,
+                    )
+
                 cooldown = float(rule.get("cooldown_sec", 2.0))
                 key = f"{rule_name}:{snap.hwnd}"
                 now = time.monotonic()
@@ -471,6 +615,8 @@ def watch_loop(
                 if _execute_action(snap, action, rule_name, ahk):
                     last_rule_hit[key] = now
                     completed_rules.add(rule_name)
+                    if rule_name not in matched_rules_ordered:
+                        matched_rules_ordered.append(rule_name)
                     matched = True
                     tick_matched_any_rule = True
                     if stop_after_all and len(completed_rules) >= len(active_rules):
@@ -478,7 +624,15 @@ def watch_loop(
                             f"[WATCH] All target rules executed "
                             f"({len(completed_rules)}/{len(active_rules)}). Stopping watcher."
                         )
-                        return
+                        return WatchResult(
+                            status="ready",
+                            detail=f"All target rules executed ({len(completed_rules)}/{len(active_rules)}).",
+                            matched_rules=matched_rules_ordered,
+                            screenshots=screenshots,
+                            main_workspace_title=main_workspace_title,
+                            elapsed_sec=round(time.monotonic() - start_time, 3),
+                            exit_code=0,
+                        )
                     break
 
                 if not needs_scan:
@@ -495,6 +649,8 @@ def watch_loop(
                 if fp not in seen_unknown_fps and (snap.elements or snap.texts or snap.child_titles):
                     seen_unknown_fps.add(fp)
                     json_p, png_p = save_unknown_window_dump(snap, dump_dir)
+                    if png_p is not None:
+                        screenshots.append(str(png_p))
                     btns = [f"'{e.name}' ({e.control_type})" for e in snap.elements if e.name]
                     print(
                         f"[UNKNOWN POPUP] '{snap.display_title}' ({snap.process_name}) | "
@@ -514,7 +670,15 @@ def watch_loop(
                     )
                 elif now_ready - main_ready_since >= ready_grace_sec:
                     print(f"[WATCH] Main window ready: '{main_workspace_title}'. Stopping watcher.")
-                    return
+                    return WatchResult(
+                        status="ready",
+                        detail=f"Main workspace ready: {main_workspace_title}",
+                        matched_rules=matched_rules_ordered,
+                        screenshots=screenshots,
+                        main_workspace_title=main_workspace_title,
+                        elapsed_sec=round(time.monotonic() - start_time, 3),
+                        exit_code=0,
+                    )
             else:
                 main_ready_since = None
 

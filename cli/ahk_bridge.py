@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -33,6 +34,32 @@ class AHKBridge:
     def _resolve_ahk_exe(explicit: str | Path | None) -> str:
         if explicit:
             return str(explicit)
+
+        for env_key in ("MAX_AUTO_AHK_EXE", "MAX_AGENT_AHK_EXE", "AHK_EXE"):
+            env_val = os.environ.get(env_key)
+            if env_val and Path(env_val).is_file():
+                return env_val
+
+        repo_root = Path(__file__).resolve().parent.parent
+        exe_dir = Path(sys.executable).resolve().parent
+        bundled_candidates = [
+            repo_root / "ahk" / "AutoHotkey64.exe",
+            repo_root / "tools" / "AutoHotkey64.exe",
+            repo_root / "bin" / "AutoHotkey64.exe",
+            repo_root / "AutoHotkey64.exe",
+            exe_dir / "AutoHotkey64.exe",
+            exe_dir / "ahk" / "AutoHotkey64.exe",
+            exe_dir / "tools" / "AutoHotkey64.exe",
+            exe_dir / "bin" / "AutoHotkey64.exe",
+            exe_dir.parent / "ahk" / "AutoHotkey64.exe",
+            exe_dir.parent / "tools" / "AutoHotkey64.exe",
+            exe_dir.parent / "bin" / "AutoHotkey64.exe",
+            exe_dir.parent / "AutoHotkey64.exe",
+        ]
+        for candidate in bundled_candidates:
+            if candidate.is_file():
+                return str(candidate)
+
         for name in ("AutoHotkey64.exe", "AutoHotkey.exe", "autohotkey"):
             found = shutil.which(name)
             if found:

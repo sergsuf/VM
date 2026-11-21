@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
+import uuid
 from pathlib import Path
 
 import click
@@ -14,10 +16,17 @@ from cli.max_deployer import (
     find_all_installed_3dsmax,
     find_installed_3dsmax_exe,
     get_default_3dsmax_exe,
+    get_installed_3dsmax_exe,
     launch_3dsmax,
 )
 from cli.ui_inspector import scan_windows
-from cli.watcher import WatcherConfig, is_process_running, wait_for_window, watch_loop
+from cli.watcher import (
+    DEFAULT_DUMP_DIR,
+    WatcherConfig,
+    is_process_running,
+    wait_for_window,
+    watch_loop,
+)
 
 DEFAULT_CONFIG = Path(__file__).resolve().parent.parent / "config" / "rules.yaml"
 
@@ -139,6 +148,16 @@ def deploy_cmd(source: Path, version: str, startup: bool, dry_run: bool) -> None
 @click.option("--interactive", "-i", is_flag=True, help="Interactively choose which installed 3ds Max version to launch.")
 @click.option("--timeout", "-t", type=float, default=60.0)
 @click.option("--dry-run", is_flag=True)
+@click.option(
+    "--profile",
+    type=click.Choice(["client", "vm-test"], case_sensitive=False),
+    default="vm-test",
+    help="Execution profile: 'vm-test' auto-dismisses licensing; 'client' stops with exit code 10 on licensing.",
+)
+@click.option("--max-timeout", type=float, default=None, help="Hard upper-bound timeout in seconds even if 3dsmax.exe is still running.")
+@click.option("--dump-dir", type=click.Path(path_type=Path), default=None, help="Directory for popup dumps and licensing screenshots.")
+@click.option("--json-result", type=click.Path(path_type=Path), default=None, help="Optional path to write structured WatchResult JSON.")
+@click.option("--de-elevate/--no-de-elevate", default=None, help="Launch 3ds Max at Medium integrity (defaults to True in client profile, False in vm-test).")
 def run(
     config: Path,
     ahk_exe: Path | None,
@@ -149,8 +168,15 @@ def run(
     interactive: bool,
     timeout: float,
     dry_run: bool,
+    profile: str,
+    max_timeout: float | None,
+    dump_dir: Path | None,
+    json_result: Path | None,
+    de_elevate: bool | None,
 ) -> None:
     """Launch 3ds Max (2024-2028) if not running, then watch and handle startup popups."""
+    normalized_profile = profile.lower()
+    effective_de_elevate = (normalized_profile == "client") if de_elevate is None else de_elevate
     already_running = is_process_running(("3dsmax",))
     resolved_version = version
     resolved_exe = max_exe
@@ -185,7 +211,7 @@ def run(
 
     if resolved_exe is None:
         if resolved_version:
-            resolved_exe = get_default_3dsmax_exe(resolved_version)
+            resolved_exe = get_installed_3dsmax_exe(resolved_version) or get_default_3dsmax_exe(resolved_version)
         else:
             detected = find_installed_3dsmax_exe()
             if detected:
@@ -213,20 +239,59 @@ def run(
                 )
             click.echo(f"[RUN] Launching 3ds Max: {resolved_exe}")
             try:
-                launch_3dsmax(max_exe=resolved_exe, dry_run=dry_run)
+                launch_3dsmax(
+                    max_exe=resolved_exe,
+                    dry_run=dry_run,
+                    de_elevate=effective_de_elevate,
+                )
             except FileNotFoundError as exc:
                 raise click.ClickException(str(exc)) from exc
 
+    def _write_json_result_atomic(path: Path, payload: dict[str, object]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = path.parent / f".{path.name}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp"
+        try:
+            tmp_path.write_text(
+                json.dumps(payload, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            os.replace(tmp_path, path)
+        except BaseException:
+            tmp_path.unlink(missing_ok=True)
+            raise
+
     cfg = WatcherConfig.from_yaml(config)
     ahk = AHKBridge(ahk_exe=ahk_exe, dry_run=dry_run)
-    watch_loop(
-        config=cfg,
-        ahk=ahk,
-        poll_interval=1.0,
-        timeout_sec=timeout,
-        learn=True,
-        stop_on_main_ready=True,
-    )
+    try:
+        result = watch_loop(
+            config=cfg,
+            ahk=ahk,
+            poll_interval=1.0,
+            timeout_sec=timeout,
+            learn=True,
+            dump_dir=dump_dir or DEFAULT_DUMP_DIR,
+            stop_on_main_ready=True,
+            profile=normalized_profile,
+            max_timeout_sec=max_timeout,
+            fail_if_process_exits=(normalized_profile == "client" and launch),
+        )
+    except Exception as exc:
+        if json_result is not None:
+            _write_json_result_atomic(
+                json_result,
+                {
+                    "status": "failed",
+                    "exit_code": 1,
+                    "detail": str(exc),
+                    "matched_rules": [],
+                    "screenshots": [],
+                },
+            )
+        raise click.ClickException(str(exc)) from exc
+    if json_result is not None:
+        _write_json_result_atomic(json_result, result.to_dict())
+    if result.exit_code != 0:
+        sys.exit(result.exit_code)
 
 
 @cli.command()

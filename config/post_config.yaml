@@ -1,0 +1,56 @@
+# Declarative 1-click POST_CONFIG pipeline for Autodesk 3ds Max (2024-2028)
+# Keep simple key: value and inline [a, b] lists so stdlib YAML parser works in python-embed.
+
+steps:
+  - step_id: renderer_corona
+    name: "Install Chaos Corona Renderer"
+    category: renderer
+    enabled: true
+    versions: [2024, 2025, 2026, 2027, 2028]
+    installer_glob: "*corona*.exe"
+    silent_args: ["/quiet", "/norestart"]
+    skip_if_plugin: "CoronaMaxUtils.dlu"
+
+  - step_id: renderer_vray
+    name: "Install Chaos V-Ray Renderer"
+    category: renderer
+    enabled: true
+    versions: [2024, 2025, 2026, 2027, 2028]
+    installer_glob: "*vray*.exe"
+    silent_args: ["-gui=0", "-quiet=1", "-auto=1"]
+    skip_if_plugin: "vrender.dlr"
+
+  - step_id: ui_theme
+    name: "Apply 3ds Max UI Theme"
+    category: theme
+    enabled: true
+    versions: [2024, 2025, 2026, 2027, 2028]
+    extensions: [.clrx, .cuix, .ini]
+
+  - step_id: ui_quad_menu
+    name: "Install Custom Quad Menus"
+    category: quad_menu
+    enabled: true
+    versions: [2024, 2025, 2026, 2027, 2028]
+    legacy_extensions: [.mnux]
+    modern_extensions: [.mnx]
+
+  - step_id: ui_hotkeys
+    name: "Apply Custom Hotkeys"
+    category: hotkey
+    enabled: true
+    versions: [2024, 2025, 2026, 2027, 2028]
+    extensions: [.hsx, .kbdx]
+
+  - step_id: scripts_deploy
+    name: "Deploy MAXScripts, Macros, Icons & MZP"
+    category: scripts
+    enabled: true
+    versions: [2024, 2025, 2026, 2027, 2028]
+    extensions: [.ms, .mse, .mcr, .mzp, .bmp, .png, .ico]
+
+  - step_id: verify_install
+    name: "Verify 3ds Max Installation & Renderers"
+    category: verify
+    enabled: true
+    versions: [2024, 2025, 2026, 2027, 2028]

@@ -69,3 +69,52 @@ python -m cli.main run
 python -m cli.main deploy-scripts --version 2027
 ```
 Копіює `.ms`, `.mse`, `.mcr`, `.mzp` із `max_scripts/` у `%LOCALAPPDATA%\Autodesk\3dsMax\<версія> - 64bit\ENU\`.
+
+---
+
+## Remote 3ds Max Deployment System (`max-operator` / `max-client` / `max-relay`)
+
+Чисто-Python (`stdlib-only` у `remote/`) система віддаленого розгортання **Autodesk 3ds Max (2024–2028)** на ПК клієнта з підтримкою Direct LAN/тунелю та NAT-traversal Relay:
+
+- **`max-operator`** (`python -m remote.operator.main`): Веб-пульт керування (HTML5/CSS/JS + SSE `/api/v1/ui/events`), каталог ISO з SHA-256 кешуванням і `Range` (`206 Partial Content`), роздача оновлень `app/`, генерація `connect.json` та `maxpair://...`.
+- **`max-client`** (`python -m remote.client.main`): Портативний клієнтський агент (запускається через `packaging/Start-MaxAgent.bat` → `remote/client/bootstrap.py` з одноразовим UAC та авто-відкатом) + локальний Status UI (`127.0.0.1:8770`, без `tkinter`, відкривається в Edge `--app=...` для TeamViewer).
+- **`max-relay`** (`python -m remote.relay_server`): Вбудований чистий Python relay-сервер для роботи за NAT без прокидання портів.
+
+### 7-етапна машина станів
+
+`PREP` → `DOWNLOAD_ISO` *(локальна перевірка SHA-256 або докачування `.part`)* → `INSTALL_MAX` → `WAIT_LICENSE` *(ручне ліцензування через TeamViewer + кнопка підтвердження)* → `FIRST_RUN` *(автопроклікування через `max-auto --profile client`)* → `POST_CONFIG` *(1-клік: Corona, V-Ray, теми, quad-меню, скрипти, `verify_install.ms`)* → `DONE`.
+
+### Швидкий старт
+
+1. **Direct режим (LAN / тунель):**
+```bash
+python -m remote.operator.main --host 0.0.0.0 --port 8765 --iso-dir ./isos --updates-dir ./updates --no-browser
+# Завантажте connect.json з http://127.0.0.1:8765/api/v1/ui/pairing/connect.json
+python -m remote.client.main --connect-file connect.json --iso-dir ./client_isos --driver simulated --headless
+```
+
+2. **Relay режим (NAT traversal):**
+```bash
+python -m remote.relay_server --host 0.0.0.0 --port 8766
+python -m remote.operator.main --mode relay --relay-url http://127.0.0.1:8766 --iso-dir ./isos --no-browser
+python -m remote.client.main --connect-file connect.json --driver simulated --headless
+```
+
+### Портативна збірка, автооновлення та тести
+
+```bash
+# Збірка пакета оновлення app/ (manifest.json + zip)
+python -m packaging.build_app_update --version 0.3.0 --out-dir ./updates
+
+# Збірка портативного клієнта для Windows (папка: python-embed + AutoHotkey64.exe)
+python -m packaging.build_portable_client --out-dir ./dist/MaxAgent
+
+# Або один саморозпаковний .exe для TeamViewer (на Windows, розпаковується в .\MaxAgent\ поряд із .exe):
+# .\packaging\build_sfx_exe.ps1 -OutExe dist\MaxAgent-Portable.exe -Version 1.0.0
+
+# Запуск усіх unit- та інтеграційних тестів
+python3 -m unittest discover -s tests -p "test_*.py"
+```
+
+Детальніше див. у [docs/REMOTE_DEPLOY.md](docs/REMOTE_DEPLOY.md).
+

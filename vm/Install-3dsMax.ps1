@@ -19,7 +19,8 @@ param(
     [switch]$Interactive,
     [switch]$KeepIsoMounted,
     [switch]$ListOnly,
-    [switch]$PauseOnExit
+    [switch]$PauseOnExit,
+    [switch]$QuietConsole
 )
 
 Set-StrictMode -Version Latest
@@ -142,7 +143,25 @@ function Write-Status {
         if ($statusDirectory -and -not (Test-Path -LiteralPath $statusDirectory)) {
             New-Item -ItemType Directory -Path $statusDirectory -Force | Out-Null
         }
-        Set-Content -LiteralPath $script:ActiveStatusPath -Value "$Percent%|$Message" -Encoding UTF8
+        $payload = "$Percent%|$Message"
+        $tmpPath = "$($script:ActiveStatusPath).tmp"
+        for ($attempt = 0; $attempt -lt 3; $attempt++) {
+            try {
+                [System.IO.File]::WriteAllText($tmpPath, $payload, [System.Text.Encoding]::UTF8)
+                Move-Item -LiteralPath $tmpPath -Destination $script:ActiveStatusPath -Force
+                break
+            } catch [System.IO.IOException] {
+                if ($attempt -eq 2) {
+                    Set-Content -LiteralPath $script:ActiveStatusPath -Value $payload -Encoding UTF8 -ErrorAction SilentlyContinue
+                } else {
+                    Start-Sleep -Milliseconds 50
+                }
+            }
+        }
+    }
+
+    if ($QuietConsole) {
+        return
     }
 
     try {
@@ -175,6 +194,36 @@ function Write-Status {
         [Console]::SetCursorPosition([Math]::Min($status.Length, [Console]::WindowWidth - 1), $cursorTop)
     } catch {
         [Console]::Write("`r$title`n$status")
+    }
+}
+
+function Save-OdisLogs {
+    param(
+        [string]$TargetVersion,
+        [string]$DestDir
+    )
+    if (-not $DestDir) { return }
+    try {
+        if (-not (Test-Path -LiteralPath $DestDir)) {
+            New-Item -ItemType Directory -Path $DestDir -Force | Out-Null
+        }
+        $odisLocal = Join-Path $env:LOCALAPPDATA 'Autodesk\ODIS'
+        if (Test-Path -LiteralPath $odisLocal -PathType Container) {
+            Get-ChildItem -LiteralPath $odisLocal -Filter '*.log' -File -ErrorAction SilentlyContinue |
+                ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $DestDir -Force -ErrorAction SilentlyContinue }
+        }
+        $tempDir = [System.IO.Path]::GetTempPath()
+        $tempLog = Join-Path $tempDir "3dsMax_${TargetVersion}_install.log"
+        if (Test-Path -LiteralPath $tempLog -PathType Leaf) {
+            Copy-Item -LiteralPath $tempLog -Destination $DestDir -Force -ErrorAction SilentlyContinue
+        }
+        Get-ChildItem -LiteralPath $tempDir -Filter 'Autodesk_*.log' -File -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTimeUtc -Descending |
+            Select-Object -First 5 |
+            ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $DestDir -Force -ErrorAction SilentlyContinue }
+        Write-Log "Collected ODIS/installer logs into $DestDir"
+    } catch {
+        Write-Log "Failed to collect ODIS logs: $($_.Exception.Message)" 'WARNING'
     }
 }
 
@@ -346,7 +395,7 @@ function Install-Single3dsMaxVersion {
     if (Test-Path -LiteralPath $maxExecutable -PathType Leaf) {
         Write-Log "$($cfg.DisplayName) is already installed."
         Write-Status 100 "$($cfg.DisplayName) is already installed."
-        Write-Host ''
+        if (-not $QuietConsole) { Write-Host '' }
         return
     }
 
@@ -354,12 +403,30 @@ function Install-Single3dsMaxVersion {
         throw "ISO file was not found: $TargetIsoPath"
     }
 
+    $targetDriveLetter = if ($maxExecutable -match '^([A-Za-z]):') { $Matches[1].ToUpper() } else { 'C' }
+    $minRequiredBytes = 20 * 1GB
+    try {
+        $driveInfo = [System.IO.DriveInfo]::new("${targetDriveLetter}:\")
+        $freeBytes = $driveInfo.AvailableFreeSpace
+        if ($freeBytes -lt $minRequiredBytes) {
+            $freeGb = [Math]::Round($freeBytes / 1GB, 2)
+            throw "Insufficient disk space on ${targetDriveLetter}:\ ($freeGb GB free, at least 20 GB required)."
+        }
+    } catch {
+        if ($_.Exception.Message -like 'Insufficient disk space*') {
+            throw
+        }
+        Write-Log "Disk space check warning: $($_.Exception.Message)" 'WARNING'
+    }
+
     $mountedByScript = $false
     $folderSnapshotJob = $null
+    $odisLogDir = Join-Path (Split-Path -Parent $cfg.LogPath) "odis-$TargetVersion"
 
     try {
         Write-Log "Starting silent installation of $($cfg.DisplayName) from $TargetIsoPath"
         Write-Status 0 'Mounting installation media...'
+        Unblock-File -LiteralPath $TargetIsoPath -ErrorAction SilentlyContinue
 
         $diskImage = Get-DiskImage -ImagePath $TargetIsoPath -ErrorAction SilentlyContinue
         if ($null -eq $diskImage -or -not $diskImage.Attached) {
@@ -414,12 +481,14 @@ function Install-Single3dsMaxVersion {
             'C:\ProgramData\Autodesk'
         )
         $installedFileCount = 0
+        $refreshInterval = [Math]::Max(1, $StatusRefreshSeconds)
+        $lastStatusWrite = [DateTime]::MinValue
 
         while ((Get-Date) -lt $deadline) {
             if (Test-Path -LiteralPath $maxInstallerLog -PathType Leaf) {
                 $maxInstallerLastWriteTime = (Get-Item -LiteralPath $maxInstallerLog).LastWriteTimeUtc
                 if ($null -eq $maxInstallerLogBaseline -or $maxInstallerLastWriteTime -gt $maxInstallerLogBaseline) {
-                    $maxInstallerResult = Get-Content -LiteralPath $maxInstallerLog -Tail 500 -ErrorAction SilentlyContinue
+                    $maxInstallerResult = (Get-Content -LiteralPath $maxInstallerLog -Tail 500 -ErrorAction SilentlyContinue) -join "`n"
                     if ($maxInstallerResult -match 'Installation success or error status: (1602|1603)') {
                         throw "$($cfg.DisplayName) installation failed or was cancelled (Windows Installer status $($Matches[1])). Review $maxInstallerLog."
                     }
@@ -431,7 +500,7 @@ function Install-Single3dsMaxVersion {
                 if (-not (Test-InstallerProcessRunning)) {
                     if (Test-Path -LiteralPath $maxExecutable -PathType Leaf) {
                         Write-Status 100 'Installation completed successfully.'
-                        Write-Host ''
+                        if (-not $QuietConsole) { Write-Host '' }
                         Write-Log "$($cfg.DisplayName) installation completed successfully."
                         return
                     }
@@ -466,8 +535,12 @@ function Install-Single3dsMaxVersion {
             }
 
             if (-not (Test-Path -LiteralPath $maxExecutable -PathType Leaf)) {
-                $calculatedPercent = [Math]::Min(95, [int](95 * $installedFileCount / $estimatedInstalledFiles))
-                Write-Status $calculatedPercent "Installing $($cfg.DisplayName)... ($installedFileCount files)"
+                $now = Get-Date
+                if (($now - $lastStatusWrite).TotalSeconds -ge $refreshInterval) {
+                    $calculatedPercent = [Math]::Min(95, [int](95 * $installedFileCount / $estimatedInstalledFiles))
+                    Write-Status $calculatedPercent "Installing $($cfg.DisplayName)... ($installedFileCount files)"
+                    $lastStatusWrite = $now
+                }
             }
 
             Start-Sleep -Milliseconds 500
@@ -476,6 +549,10 @@ function Install-Single3dsMaxVersion {
         if (-not (Test-Path -LiteralPath $maxExecutable -PathType Leaf)) {
             throw "Installation timed out after $InstallerTimeoutSeconds seconds. 3dsmax.exe was not found. Review $($script:ActiveLogPath)."
         }
+    }
+    catch {
+        Save-OdisLogs -TargetVersion $TargetVersion -DestDir $odisLogDir
+        throw
     }
     finally {
         if ($null -ne $folderSnapshotJob) {
@@ -521,6 +598,7 @@ try {
         if ($SelectIso) { $argList += '-SelectIso' }
         if ($KeepIsoMounted) { $argList += '-KeepIsoMounted' }
         if ($PauseOnExit) { $argList += '-PauseOnExit' }
+        if ($QuietConsole) { $argList += '-QuietConsole' }
 
         Start-Process -FilePath $psExe -ArgumentList ($argList -join ' ') -Verb RunAs
         exit 0
@@ -593,35 +671,45 @@ try {
         }) -join ';;'
         $argStr = "-NoProfile -ExecutionPolicy Bypass -File `"$uncScript`" -InstallTasks `"$tasksPayload`" -InstallerTimeoutSeconds $InstallerTimeoutSeconds -StatusRefreshSeconds $StatusRefreshSeconds"
         if ($KeepIsoMounted) { $argStr += ' -KeepIsoMounted' }
+        if ($QuietConsole) { $argStr += ' -QuietConsole' }
         $elevated = Start-Process -FilePath $psExe -ArgumentList $argStr -Verb RunAs -Wait -PassThru
-        exit $elevated.ExitCode
+        if ($elevated.ExitCode -eq 0) { exit 0 } else { exit 1 }
     }
 
     $stepIdx = 0
     foreach ($task in $tasks) {
         $stepIdx++
-        if ($tasks.Count -gt 1) {
+        if ($tasks.Count -gt 1 -and -not $QuietConsole) {
             Write-Host ''
             Write-Host ("=== [{0}/{1}] Installing Autodesk 3ds Max {2} ===" -f $stepIdx, $tasks.Count, $task.Version) -ForegroundColor Cyan
         }
         Install-Single3dsMaxVersion -TargetVersion $task.Version -TargetIsoPath $task.IsoPath
     }
 
-    Write-Host ''
-    Write-Host "Done. Log saved to: $($script:ActiveLogPath)" -ForegroundColor Green
-    if ($PauseOnExit) {
+    if (-not $QuietConsole) {
+        Write-Host ''
+        Write-Host "Done. Log saved to: $($script:ActiveLogPath)" -ForegroundColor Green
+    } else {
+        Write-Log "Done. Log saved to: $($script:ActiveLogPath)"
+    }
+    if ($PauseOnExit -and -not $QuietConsole) {
         Read-Host 'Press Enter to close' | Out-Null
     }
     exit 0
 }
 catch {
+    if (-not $script:ActiveStatusPath) {
+        $fallbackVer = if ($Version) { $Version } else { 'unknown' }
+        $fallbackDir = if ($IsoPath) { Join-Path (Split-Path -Parent $IsoPath) 'logs' } elseif ($PSScriptRoot) { Join-Path $PSScriptRoot 'logs' } else { 'C:\Install\logs' }
+        $script:ActiveStatusPath = Join-Path $fallbackDir "3dsMax-$fallbackVer-status.txt"
+    }
     Write-Status 0 $_.Exception.Message
-    Write-Host ''
+    if (-not $QuietConsole) { Write-Host '' }
     Write-Log $_.Exception.Message 'ERROR'
     if ($_.InvocationInfo -and $_.InvocationInfo.Line) {
         Write-Log "Command: $($_.InvocationInfo.Line.Trim())" 'ERROR'
     }
-    if ($PauseOnExit) {
+    if ($PauseOnExit -and -not $QuietConsole) {
         Write-Host ''
         Read-Host 'Installation failed. Press Enter to close' | Out-Null
     }
