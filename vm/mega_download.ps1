@@ -23,7 +23,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 
 $script:MegatoolsVersion = '1.12.2.20261116'
 $script:MegatoolsZipUrl = "https://xff.cz/megatools/builds/builds/megatools-$($script:MegatoolsVersion)-win64.zip"
