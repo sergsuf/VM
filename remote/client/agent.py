@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from collections import deque
+from datetime import datetime
 import json
 import os
 from pathlib import Path
 import re
 import socket
+import sys
 import threading
 import time
 from typing import Any, Callable
@@ -157,7 +159,10 @@ class ClientAgent:
         app_root: Path | str | None = None,
         on_update_restart: Callable[[int], None] | None = None,
         driver_bundle: DriverBundle | None = None,
+        console_output: bool = False,
     ) -> None:
+        self._console_output = bool(console_output)
+        self._console_lock = threading.Lock()
         self.data_dir = Path(data_dir) if data_dir is not None else _default_data_dir()
         self.data_dir.mkdir(parents=True, exist_ok=True)
 
@@ -301,6 +306,16 @@ class ClientAgent:
                     ),
                 )
 
+    def _emit_console(self, line: str) -> None:
+        if not self._console_output:
+            return
+        with self._console_lock:
+            try:
+                sys.stdout.write(f"{line}\n")
+                sys.stdout.flush()
+            except OSError:
+                pass
+
     def _log(self, level: str, msg: str, stage: str | None = None) -> None:
         lvl = level.upper()
         if lvl not in {"DEBUG", "INFO", "WARN", "ERROR"}:
@@ -310,6 +325,9 @@ class ClientAgent:
         with self._log_lock:
             self._pending_logs.append(entry)
             self._recent_logs.append(entry.to_dict())
+        if lvl != "DEBUG":
+            ts_local = datetime.now().strftime("%H:%M:%S")
+            self._emit_console(f"[{ts_local}] [{lvl}] [{stg}] {msg}")
 
     def _get_transport(self) -> DirectTransport | None:
         with self._lock:
@@ -342,8 +360,12 @@ class ClientAgent:
             tr.heartbeat(status)
             tr.post_state(self.sm.state)
             with self._lock:
+                was_connected = self._connected
                 self._registered = True
                 self._connected = True
+            if not was_connected:
+                target = self._pairing.server_url if self._pairing else "Operator"
+                self._log("INFO", f"Connected to Operator ({target})")
             self._maybe_mark_healthy_boot()
             return True
         except TransportError as exc:
@@ -439,10 +461,16 @@ class ClientAgent:
                         status = self._collect_status_safe()
                         tr.heartbeat(status)
                         with self._lock:
+                            was_connected = self._connected
                             self._connected = True
+                        if not was_connected:
+                            self._log("INFO", "Reconnected to Operator.")
                     except TransportError:
                         with self._lock:
+                            was_connected = self._connected
                             self._connected = False
+                        if was_connected:
+                            self._log("WARN", "Disconnected from Operator; retrying...")
             self._stop_event.wait(timeout=self.heartbeat_interval)
 
     def _flush_logs_once(self) -> None:
@@ -1007,9 +1035,12 @@ class ClientAgent:
         if iso_spec is not None:
             last_push = 0.0
             last_phase = ""
+            last_console_pct = -1
+            last_console_phase = ""
+            last_console_ts = 0.0
 
             def progress_cb(tp: TransferProgress) -> None:
-                nonlocal last_push, last_phase
+                nonlocal last_push, last_phase, last_console_pct, last_console_phase, last_console_ts
                 try:
                     self.sm.update_transfer_progress(tp)
                 except InvalidTransitionError:
@@ -1019,6 +1050,29 @@ class ClientAgent:
                     last_phase = tp.phase
                     last_push = now
                     self._post_state_safe()
+                pct = int(tp.percent)
+                if (
+                    tp.phase != last_console_phase
+                    or pct >= last_console_pct + 5
+                    or pct == 100
+                    or (now - last_console_ts) >= 3.0
+                ):
+                    last_console_phase = tp.phase
+                    last_console_pct = pct
+                    last_console_ts = now
+                    ts_local = datetime.now().strftime("%H:%M:%S")
+                    if tp.bytes_total > 0:
+                        done_mb = tp.bytes_done / (1024 * 1024)
+                        total_mb = tp.bytes_total / (1024 * 1024)
+                        spd_mb = tp.speed_bps / (1024 * 1024)
+                        self._emit_console(
+                            f"[{ts_local}] [INFO] [DOWNLOAD_ISO] {tp.phase}: "
+                            f"{pct}% ({done_mb:.1f}/{total_mb:.1f} MB, {spd_mb:.1f} MB/s)"
+                        )
+                    else:
+                        self._emit_console(
+                            f"[{ts_local}] [INFO] [DOWNLOAD_ISO] {tp.phase}: {pct}%"
+                        )
 
             try:
                 client = IsoTransferClient(transport=self._get_transport())
@@ -1083,9 +1137,11 @@ class ClientAgent:
         )
         last_push = 0.0
         last_pct = -1
+        last_console_pct = -1
+        last_console_msg = ""
 
         def progress_cb(percent: int, message: str) -> None:
-            nonlocal last_push, last_pct
+            nonlocal last_push, last_pct, last_console_pct, last_console_msg
             try:
                 self.sm.update_install_progress(percent, message)
             except InvalidTransitionError:
@@ -1095,6 +1151,16 @@ class ClientAgent:
                 last_pct = percent
                 last_push = now
                 self._post_state_safe()
+            if (
+                percent in (0, 100)
+                or percent >= last_console_pct + 5
+                or message != last_console_msg
+            ):
+                last_console_pct = percent
+                last_console_msg = message
+                ts_local = datetime.now().strftime("%H:%M:%S")
+                suffix = f" - {message}" if message else ""
+                self._emit_console(f"[{ts_local}] [INFO] [INSTALL_MAX] {percent}%{suffix}")
 
         def log_cb(level: str, msg: str) -> None:
             self._log(level, msg, stage=Stage.INSTALL_MAX.value)

@@ -43,7 +43,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--headless",
         action="store_true",
-        help="Do not open Edge/browser window for local Status UI",
+        help="Run in console-only mode without opening a browser window (default)",
+    )
+    parser.add_argument(
+        "--web-ui",
+        "--open-ui",
+        dest="web_ui",
+        action="store_true",
+        help="Open local Status UI in Edge/browser window (disabled by default)",
     )
     parser.add_argument(
         "--status-port",
@@ -53,6 +60,31 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--client-id", help="Explicit client identifier")
     return parser
+
+
+def _print_console_banner(
+    agent: ClientAgent, pairing: PairingConfig | None, status_url: str
+) -> None:
+    st = agent.state
+    sys_st = agent.system_status
+    operator_str = (
+        f"{pairing.server_url} ({pairing.mode})"
+        if pairing is not None
+        else "Not paired (connect.json not found)"
+    )
+    lines = [
+        "=" * 60,
+        " 3ds Max Deployment Client Agent (Console Mode)",
+        "=" * 60,
+        f" Client ID : {agent.client_id}",
+        f" Host      : {sys_st.hostname} (Admin: {'YES' if sys_st.is_admin else 'NO'})",
+        f" Operator  : {operator_str}",
+        f" ISO Dir   : {agent.iso_dir}",
+        f" Stage     : {st.stage.value} ({st.status.value})",
+        f" Status API: {status_url}",
+        "=" * 60,
+    ]
+    print("\n".join(lines), flush=True)
 
 
 def _resolve_pairing(args: argparse.Namespace) -> PairingConfig | None:
@@ -103,10 +135,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         iso_dir=args.iso_dir,
         assets_dir=args.assets_dir,
         client_id=args.client_id,
+        console_output=True,
     )
     status_server = ClientStatusServer(agent, host="127.0.0.1", port=args.status_port)
     status_server.start()
-    launch_status_ui_window(status_server.url, headless=args.headless)
+    _print_console_banner(agent, pairing, status_server.url)
+    if args.web_ui and not args.headless:
+        launch_status_ui_window(status_server.url, headless=False)
 
     def _handle_sig(_signum: int, _frame: object) -> None:
         agent.stop()

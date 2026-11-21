@@ -391,6 +391,105 @@ class TestOperatorAndClient(unittest.TestCase):
                     err_body = json.loads(ctx.exception.read().decode("utf-8"))
                     self.assertIn("error", err_body)
 
+    def test_client_main_console_mode_default_no_browser_window(self) -> None:
+        import contextlib
+        import io
+        from unittest import mock
+
+        from remote.client import main as client_main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            buf = io.StringIO()
+            with (
+                mock.patch.object(client_main, "launch_status_ui_window") as mock_launch,
+                mock.patch.object(ClientAgent, "wait", side_effect=lambda: True),
+                contextlib.redirect_stdout(buf),
+            ):
+                rc = client_main.main(
+                    [
+                        "--driver",
+                        "simulated",
+                        "--data-dir",
+                        str(root / "data"),
+                        "--iso-dir",
+                        str(root / "isos"),
+                        "--status-port",
+                        "0",
+                        "--client-id",
+                        "console-default-test",
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            mock_launch.assert_not_called()
+            out = buf.getvalue()
+            self.assertIn("Console Mode", out)
+            self.assertIn("console-default-test", out)
+            self.assertIn("Starting ClientAgent console-default-test", out)
+
+            with (
+                mock.patch.object(client_main, "launch_status_ui_window") as mock_launch_ui,
+                mock.patch.object(ClientAgent, "wait", side_effect=lambda: True),
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                client_main.main(
+                    [
+                        "--driver",
+                        "simulated",
+                        "--data-dir",
+                        str(root / "data2"),
+                        "--iso-dir",
+                        str(root / "isos2"),
+                        "--status-port",
+                        "0",
+                        "--web-ui",
+                    ]
+                )
+            mock_launch_ui.assert_called_once()
+
+    def test_client_agent_console_output_flag(self) -> None:
+        import contextlib
+        import io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            silent_buf = io.StringIO()
+            with contextlib.redirect_stdout(silent_buf):
+                silent_agent = ClientAgent(
+                    drivers=create_simulated_bundle(work_dir=root / "sim1"),
+                    data_dir=root / "d1",
+                    iso_dir=root / "i1",
+                    client_id="silent-1",
+                    console_output=False,
+                )
+                silent_agent._log("INFO", "hidden-msg")
+            self.assertEqual(silent_buf.getvalue(), "")
+
+            live_buf = io.StringIO()
+            with contextlib.redirect_stdout(live_buf):
+                live_agent = ClientAgent(
+                    drivers=create_simulated_bundle(work_dir=root / "sim2"),
+                    data_dir=root / "d2",
+                    iso_dir=root / "i2",
+                    client_id="live-1",
+                    console_output=True,
+                )
+                live_agent._log("INFO", "visible-status-msg")
+            self.assertIn("[INFO] [PREP] visible-status-msg", live_buf.getvalue())
+
+    def test_client_module_no_runpy_warning(self) -> None:
+        import subprocess
+        import sys
+
+        proc = subprocess.run(
+            [sys.executable, "-m", "remote.client.main", "--help"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0)
+        self.assertNotIn("RuntimeWarning", proc.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
