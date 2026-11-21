@@ -120,11 +120,20 @@ function Invoke-MegatoolsDownload {
     }
 
     if ($exitCode -ne 0) {
-        $errText = ($capturedLines -join "`n")
+        $errorLines = @($capturedLines | Where-Object { $_ -match '^ERROR:' })
+        $errText = ($errorLines -join "`n")
+        if (-not $errText) { $errText = ($capturedLines -join "`n") }
+
+        $allAlreadyExist = ($errorLines.Count -gt 0) -and (@($errorLines | Where-Object { $_ -notmatch '^ERROR:\s*File already exists' }).Count -eq 0)
+        if ($allAlreadyExist) {
+            Write-MegaLog "Усі файли вже присутні у цільовій папці (перекачування пропущено)." 'OK'
+            return
+        }
+
         if ($errText -match '(?i)509|bandwidth|quota|overquota') {
             throw "Перевищено ліміт трафіку Mega.nz (Bandwidth/Quota limit). Спробуйте пізніше або через інший IP. Деталі: $errText"
         }
-        if ($errText -match '(?i)ENOENT|not found|invalid|parse|malformed|key') {
+        if ($errText -match '(?i)ENOENT|not found|invalid|parse|malformed|can''t find|failed to') {
             throw "Невалідне або видалене посилання Mega.nz: $MegaUrl. Деталі: $errText"
         }
         if ($errText -match '(?i)could not resolve|timed out|connection|network|ssl|tls') {
