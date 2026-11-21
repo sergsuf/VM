@@ -25,7 +25,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 
-$script:MegatoolsVersion = '1.12.2.20261116'
+$script:MegatoolsVersion = '1.11.5.20250706'
 $script:MegatoolsZipUrl = "https://xff.cz/megatools/builds/builds/megatools-$($script:MegatoolsVersion)-win64.zip"
 
 function Write-MegaLog {
@@ -50,7 +50,7 @@ function Ensure-Megatools {
 
     if (-not $ToolsBaseDir) {
         $repoRoot = Split-Path -Parent $PSScriptRoot
-        $ToolsBaseDir = Join-Path $repoRoot 'tools\megatools'
+        $ToolsBaseDir = Join-Path $repoRoot "tools\megatools\$($script:MegatoolsVersion)"
     }
 
     $exePath = Join-Path $ToolsBaseDir 'megatools.exe'
@@ -103,7 +103,7 @@ function Invoke-MegatoolsDownload {
     $prevPref = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        & $ExePath dl --path $DownloadDir $MegaUrl 2>&1 | ForEach-Object {
+        & $ExePath dl --print-names --path $DownloadDir $MegaUrl 2>&1 | ForEach-Object {
             $line = if ($_ -is [System.Management.Automation.ErrorRecord]) {
                 $_.Exception.Message
             } else {
