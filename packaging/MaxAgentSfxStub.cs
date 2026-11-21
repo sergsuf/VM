@@ -137,7 +137,7 @@ namespace MaxAgentSfx
             {
                 escaped[i] = "\"" + args[i].Replace("\"", "\\\"") + "\"";
             }
-            return "/c " + quotedBat + " " + string.Join(" ", escaped);
+            return "/c \"" + quotedBat + " " + string.Join(" ", escaped) + "\"";
         }
     }
 }
