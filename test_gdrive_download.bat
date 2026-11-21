@@ -3,7 +3,7 @@ chcp 65001 >nul
 setlocal
 
 set "GD_URL=%~1"
-if "%GD_URL%"=="" set "GD_URL=https://drive.google.com/file/d/1hSmR01iTpAfh2UplytIRFd81CpCrvN5G/view?usp=drive_link"
+if "%GD_URL%"=="" set "GD_URL=https://drive.google.com/file/d/1ltWrICeaHd3_gI6vUM5RmPzued4C7Wns/view?usp=sharing"
 
 set "TARGET_DIR=%~2"
 if "%TARGET_DIR%"=="" set "TARGET_DIR=C:\Temp\gdrive_test"
